@@ -1269,6 +1269,7 @@ function showApp(account) {
     document.getElementById("loginSection").style.display = "none";
     document.getElementById("appSection").style.display = "";
     document.getElementById("userName").textContent = account.name || account.username;
+    updateMobileUserName(account.name || account.username);
     // Show dashboard by default after login
     showDashboardOnLoad();
 }
@@ -1483,13 +1484,13 @@ async function saveQuote() {
         // Auto-add customer to customer list
         autoAddCustomer(customerName, document.getElementById('customerAddr1').value, document.getElementById('customerAddr2').value, document.getElementById('customerEmail').value);
 
-        showStatus('Saved! ' + baseFileName + '.pdf and .xlsx uploaded to OneDrive.', 'success');
+        showStatus('Saved! ' + baseFileName + '.pdf uploaded to OneDrive.', 'success');
     } catch (error) {
         console.error('Save error:', error);
         showStatus('Error: ' + error.message, 'error');
     } finally {
         saveBtn.disabled = false;
-        saveBtn.innerHTML = '&#128190; Save to OneDrive';
+        saveBtn.innerHTML = '&#128190; Save';
     }
 }
 
@@ -3981,7 +3982,9 @@ function showCustomerHistory() {
             div.onclick = function() {
                 closeCustomerHistory();
                 closeSearchModal();
-                loadQuoteFromIndex(q);
+                loadQuoteDataToForm(q);
+                showView('quote');
+                showStatus('Loaded quote #' + (q.quoteNumber || 'N/A'), 'success');
             };
             list.appendChild(div);
         });
