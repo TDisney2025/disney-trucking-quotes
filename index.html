@@ -933,6 +933,12 @@ let accessToken = null;
 // INITIALIZATION
 // =============================================
 function initializeApp() {
+    // Force HTTPS on production (crypto.subtle requires secure context for MSAL PKCE)
+    if (window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        window.location.href = window.location.href.replace('http:', 'https:');
+        return;
+    }
+
     try {
         msalInstance = new msal.PublicClientApplication(msalConfig);
         console.log("MSAL instance created successfully");
