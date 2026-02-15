@@ -601,7 +601,7 @@
             <button class="btn-tool" id="toolsBtn" onclick="showView('tools')" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;">&#9881; Tools</button>
             <button class="btn-tool btn-save" id="saveBtn" onclick="saveQuote()">&#128190; Save</button>
             <button class="btn-tool btn-email" id="btnEmail" onclick="handleEmailQuote()">&#9993; Email</button>
-            <button class="btn-tool btn-new" onclick="handleNewQuote()">&#10010; New</button>
+            <button class="btn-tool btn-new" id="btnNew" onclick="handleNewQuote()">&#10010; New</button>
             <button class="btn-tool btn-copy" id="btnCopy" onclick="handleCopyQuote()">&#128203; Copy</button>
             <button class="btn-tool btn-delete" id="btnDelete" onclick="handleDeleteQuote()">&#128465; Delete</button>
             <button class="btn-tool btn-search" onclick="openSearchModal()">&#128269; Search</button>
@@ -699,7 +699,7 @@
                         </tr>
                     </thead>
                     <tbody id="dashRecentBody"></tbody>
-                </table>
+                </table></div>
                 <div class="dash-empty" id="dashNoQuotes" style="display:none;">
                     <div class="empty-icon">&#128196;</div>
                     No quotes yet. Create your first quote to get started!
@@ -2548,7 +2548,7 @@ function showView(view) {
 
     // Show/hide quote-only buttons (Save, Email, Copy, Print only when quote is open)
     var isQuote = (view === 'quote');
-    var quoteButtons = ['saveBtn', 'btnEmail', 'btnCopy', 'btnDelete', 'btnPrint'];
+    var quoteButtons = ['saveBtn', 'btnEmail', 'btnNew', 'btnCopy', 'btnDelete', 'btnPrint'];
     quoteButtons.forEach(function(id) {
         var btn = document.getElementById(id);
         if (btn) btn.style.display = isQuote ? '' : 'none';
