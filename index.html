@@ -957,8 +957,8 @@
                     <h2>&#128295; Utilities</h2>
                 </div>
                 <div class="tools-card-body" style="padding:16px;">
-                    <button class="btn-add-item" onclick="syncQuoteIndex()" style="background:linear-gradient(135deg,#ff6b35,#f7931e);">&#128259; Sync Quote Index to OneDrive</button>
-                    <p style="font-size:12px;color:#888;margin-top:8px;">Push the local quote-index.json to OneDrive (use after importing quotes)</p>
+                    <button class="btn-add-item" onclick="syncQuoteIndex()" style="background:linear-gradient(135deg,#ff6b35,#f7931e);">&#128259; Refresh Quote Index</button>
+                    <p style="font-size:12px;color:#888;margin-top:8px;">Re-download the quote index from OneDrive (use if quote count looks wrong)</p>
                 </div>
             </div>
         </div>
@@ -3373,24 +3373,16 @@ function downloadSampleCsv() {
     showStatus('Sample CSV downloaded! Fill it in and use Import CSV to upload.', 'success');
 }
 
-// Sync local quote-index.json to OneDrive
+// Refresh quote index from OneDrive cloud
 async function syncQuoteIndex() {
-    showStatus('Loading local quote index...', 'info');
+    showStatus('Refreshing quote index from OneDrive...', 'info');
     try {
-        // Fetch local file from the server
-        var resp = await fetch('/quote-index.json');
-        if (!resp.ok) throw new Error('Could not read local quote-index.json');
-        var localData = await resp.json();
-
-        showStatus('Uploading ' + localData.length + ' quotes to OneDrive...', 'info');
-        quoteIndex = localData;
         await getToken();
-        await saveQuoteIndex();
-
-        showStatus('Synced! ' + localData.length + ' quotes uploaded to OneDrive.', 'success');
+        await loadQuoteIndex();
+        showStatus('Quote index refreshed! ' + quoteIndex.length + ' quotes loaded from OneDrive.', 'success');
     } catch (e) {
         console.error('Sync error:', e);
-        showStatus('Sync failed: ' + e.message, 'error');
+        showStatus('Refresh failed: ' + e.message, 'error');
     }
 }
 
