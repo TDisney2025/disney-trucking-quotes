@@ -1473,10 +1473,20 @@ async function generatePDF() {
     pdf.setFontSize(42);
     pdf.text('QUOTE', RE, secY + 30, { align: 'right' });
 
-    // Customer value
+    // Customer value (name + address lines)
     pdf.setFont('times', 'normal');
     pdf.setFontSize(11);
-    pdf.text(val('customerName'), ML + 18, secY + 18);
+    var custLines = [];
+    var cn = val('customerName');
+    var ca1 = val('customerAddr1');
+    var ca2 = val('customerAddr2');
+    if (cn) custLines.push(cn);
+    if (ca1) custLines.push(ca1);
+    if (ca2) custLines.push(ca2);
+    if (custLines.length === 0) custLines.push('');
+    for (var ci = 0; ci < custLines.length; ci++) {
+        pdf.text(custLines[ci], ML + 18, secY + 18 + (ci * 14));
+    }
 
     // Job values (multi-line support)
     var jobLines = [];
@@ -1515,10 +1525,10 @@ async function generatePDF() {
         tData.push([
             val('hauledFrom_' + i),
             val('itemService_' + i),
-            val('material_' + i).replace(/^\$/, ''),
-            val('haul_' + i).replace(/^\$/, ''),
+            val('material_' + i),
+            val('haul_' + i),
             val('unit_' + i),
-            txt('total_' + i).replace(/^\$/, '')
+            txt('total_' + i)
         ]);
     }
 
@@ -1554,10 +1564,10 @@ async function generatePDF() {
         columnStyles: {
             0: { cellWidth: colW[0], halign: 'center' },
             1: { cellWidth: colW[1], halign: 'center' },
-            2: { cellWidth: colW[2], halign: 'right' },
-            3: { cellWidth: colW[3], halign: 'right' },
+            2: { cellWidth: colW[2], halign: 'center' },
+            3: { cellWidth: colW[3], halign: 'center' },
             4: { cellWidth: colW[4], halign: 'center' },
-            5: { cellWidth: colW[5], halign: 'right' }
+            5: { cellWidth: colW[5], halign: 'center' }
         },
         didDrawPage: function(data) {
             var headY = data.table.head[0].cells[0].y;
