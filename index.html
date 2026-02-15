@@ -923,7 +923,7 @@
             <!-- Sales Reps Card -->
             <div class="tools-card">
                 <div class="tools-card-header">
-                    <h2>&#128101; Sales Reps</h2>
+                    <h2>&#128101; Sales Reps <span id="repCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
                     <button class="btn-add-item" onclick="openRepForm()">&#10010; Add Rep</button>
                 </div>
                 <div class="tools-card-body" id="repsList"></div>
@@ -931,7 +931,7 @@
             <!-- Customers Card -->
             <div class="tools-card">
                 <div class="tools-card-header">
-                    <h2>&#128188; Customer List</h2>
+                    <h2>&#128188; Customer List <span id="customerCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
                     <button class="btn-add-item" onclick="openCustomerForm()">&#10010; Add Customer</button>
                     <button class="btn-add-item" onclick="document.getElementById('csvFileInput').click()" style="background:linear-gradient(135deg,#2196F3,#1976D2);margin-left:6px;" title="Import customers from CSV file">&#128196; Import CSV</button>
                     <button class="btn-add-item" onclick="downloadSampleCsv()" style="background:linear-gradient(135deg,#757575,#616161);margin-left:6px;" title="Download a sample CSV template">&#128203; Sample CSV</button>
@@ -2278,8 +2278,7 @@ function addQuoteToIndex(quoteData) {
     // Remove existing entry with same quote number (update)
     quoteIndex = quoteIndex.filter(q => q.quoteNumber !== quoteData.quoteNumber);
     quoteIndex.unshift(quoteData); // add to front (most recent first)
-    // Keep max 500 entries
-    if (quoteIndex.length > 500) quoteIndex = quoteIndex.slice(0, 500);
+    // No cap — keep all quotes in the index
 }
 
 function getQuoteDataFromForm() {
@@ -3064,6 +3063,12 @@ function renderRepsList() {
     var container = document.getElementById('repsList');
     if (!container) return;
     container.innerHTML = '';
+    // Update total count (show active/total)
+    var countEl = document.getElementById('repCount');
+    if (countEl) {
+        var activeCount = salesReps.filter(function(r) { return r.active !== false; }).length;
+        countEl.textContent = '(' + activeCount + ' active, ' + salesReps.length + ' total)';
+    }
     if (salesReps.length === 0) {
         container.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;">No sales reps yet. Add one to get started!</div>';
         return;
@@ -3165,6 +3170,9 @@ function renderCustomerList() {
     var container = document.getElementById('customersList');
     if (!container) return;
     container.innerHTML = '';
+    // Update total count
+    var countEl = document.getElementById('customerCount');
+    if (countEl) countEl.textContent = '(' + customerList.length + ')';
     var search = (document.getElementById('toolsCustomerSearch') || {}).value || '';
     search = search.toLowerCase().trim();
 
