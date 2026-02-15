@@ -1485,7 +1485,7 @@ async function generatePDF() {
     if (ca2) custLines.push(ca2);
     if (custLines.length === 0) custLines.push('');
     for (var ci = 0; ci < custLines.length; ci++) {
-        pdf.text(custLines[ci], ML + 18, secY + 18 + (ci * 14));
+        pdf.text(custLines[ci], ML + 10, secY + 18 + (ci * 14));
     }
 
     // Job values (multi-line support)
@@ -1496,7 +1496,7 @@ async function generatePDF() {
     if (ja2) jobLines.push(ja2);
     if (jobLines.length === 0) jobLines.push('');
     for (var ji = 0; ji < jobLines.length; ji++) {
-        pdf.text(jobLines[ji], 248, secY + 18 + (ji * 14));
+        pdf.text(jobLines[ji], 240, secY + 18 + (ji * 14));
     }
 
     // Detail block (right, below QUOTE baseline at secY+30)
