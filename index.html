@@ -464,6 +464,105 @@
             .page-wrapper { padding: 10px; }
             .quote-page { width: 100%; min-height: auto; padding: 16px; }
         }
+
+        /* Hamburger menu button - hidden on desktop */
+        .btn-hamburger { display: none; background: transparent; color: #fff; border: 1px solid #555; font-size: 20px; padding: 4px 10px; line-height: 1; }
+
+        /* Mobile menu overlay */
+        .mobile-menu-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; }
+        .mobile-menu-overlay.active { display:block; }
+        .mobile-menu { position:fixed; top:0; right:-280px; width:280px; height:100%; background:#1a1a2e; z-index:1000; transition:right 0.3s ease; overflow-y:auto; box-shadow:-4px 0 20px rgba(0,0,0,0.3); }
+        .mobile-menu.active { right:0; }
+        .mobile-menu-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid #333; color:#fff; font-size:15px; }
+        .mobile-menu-close { background:none; border:none; color:#aaa; font-size:28px; cursor:pointer; padding:0 4px; }
+        .mobile-menu-user { padding:10px 20px; color:#aaa; font-size:13px; border-bottom:1px solid #333; }
+        .mobile-menu-items { display:flex; flex-direction:column; }
+        .mobile-menu-items button { background:none; border:none; border-bottom:1px solid #2a2a4e; color:#fff; padding:14px 20px; font-size:15px; text-align:left; cursor:pointer; transition:background 0.2s; }
+        .mobile-menu-items button:hover { background:#2a2a4e; }
+
+        /* ---- Mobile Responsive ---- */
+        @media (max-width: 768px) {
+            /* Toolbar: show hamburger, icon-only priority buttons */
+            .btn-hamburger { display: inline-flex !important; }
+            .toolbar { padding: 6px 10px; }
+            .toolbar-left { display: none; }
+            .toolbar-right { gap: 4px; }
+            .toolbar-right .btn-tool { padding: 8px 10px; font-size: 16px; }
+            /* Hide text labels - show only emoji icons */
+            .toolbar-right .btn-save,
+            .toolbar-right .btn-email,
+            .toolbar-right .btn-new,
+            .toolbar-right .btn-search { font-size: 0; }
+            .toolbar-right .btn-save::before { content: '\1F4BE'; font-size: 18px; }
+            .toolbar-right .btn-email::before { content: '\2709'; font-size: 18px; }
+            .toolbar-right .btn-new::before { content: '\2795'; font-size: 18px; }
+            .toolbar-right .btn-search::before { content: '\1F50D'; font-size: 18px; }
+            /* Hide secondary buttons on mobile (they're in hamburger menu) */
+            .toolbar-right .btn-dashboard,
+            .toolbar-right #toolsBtn,
+            .toolbar-right .btn-copy,
+            .toolbar-right .btn-delete,
+            .toolbar-right .btn-print,
+            .toolbar-right .btn-signout { display: none !important; }
+
+            /* Form grid: stack vertically */
+            .info-grid { grid-template-columns: 1fr !important; }
+            .info-section:not(:last-child) { border-right: none; border-bottom: 1px solid #ccc; }
+            .info-section { padding: 8px; }
+            .info-field input, .info-field select { font-size: 14px !important; padding: 6px 8px !important; }
+            .info-section-title { font-size: 12px; }
+
+            /* Quote page: full width, less padding */
+            .page-wrapper { padding: 4px; }
+            .quote-page { width: 100%; min-height: auto; padding: 10px; box-shadow: none; }
+
+            /* Line items table: horizontal scroll */
+            .table-scroll-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -10px; padding: 0 10px; }
+            .line-table { min-width: 600px; }
+            .line-table th { font-size: 9px; padding: 4px 2px; }
+            .line-table td input, .line-table td select { font-size: 12px !important; padding: 4px !important; }
+            .line-table td { height: 32px; }
+
+            /* Dashboard responsive */
+            .dashboard-view { padding: 12px; }
+            .dash-header { flex-direction: column; gap: 10px; }
+            .dash-header h1 { font-size: 20px; }
+            .dash-stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+            .stat-card { padding: 12px 16px; }
+            .stat-value { font-size: 24px; }
+            .dash-section { margin-bottom: 16px; }
+            .dash-table-wrap { overflow-x: auto; }
+            .dash-table { min-width: 500px; }
+            .dash-table th, .dash-table td { padding: 8px 6px; font-size: 12px; }
+            .dash-quick-actions { flex-direction: column; gap: 8px; }
+            .quick-btn { width: 100%; }
+
+            /* Search modal responsive */
+            .modal-box { width: 98%; max-width: none; max-height: 90vh; margin: 5vh 1%; border-radius: 8px; }
+            .search-row { grid-template-columns: 60px 1fr 80px; font-size: 12px; }
+            .search-row span:nth-child(3),
+            .search-row span:nth-child(4) { display: none; }
+            .search-row-header span:nth-child(3),
+            .search-row-header span:nth-child(4) { display: none; }
+            .search-input { font-size: 16px !important; }
+
+            /* Status bar */
+            .status-bar { font-size: 12px; padding: 6px 10px; }
+
+            /* Login card */
+            .login-card { padding: 24px 20px; }
+            .login-card img { width: 160px; }
+
+            /* Terms & signature sections */
+            .terms-section { font-size: 9px; }
+            .sig-line { font-size: 10px; }
+        }
+
+        @media (max-width: 480px) {
+            .dash-stats { grid-template-columns: 1fr; }
+            .toolbar-right .btn-tool { padding: 6px 8px; }
+        }
+
     </style>
 </head>
 <body>
@@ -497,6 +596,7 @@
             <span id="userName" style="color:#aaa;"></span>
         </div>
         <div class="toolbar-right">
+            <button class="btn-tool btn-hamburger" id="hamburgerBtn" onclick="toggleMobileMenu()">&#9776;</button>
             <button class="btn-tool btn-dashboard" id="dashboardBtn" onclick="showView('dashboard')">&#128202; Dashboard</button>
             <button class="btn-tool" id="toolsBtn" onclick="showView('tools')" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;">&#9881; Tools</button>
             <button class="btn-tool btn-save" id="saveBtn" onclick="saveQuote()">&#128190; Save</button>
@@ -510,6 +610,24 @@
         </div>
     </div>
 
+    <!-- Mobile Menu Overlay -->
+    <div class="mobile-menu-overlay" id="mobileMenuOverlay" onclick="toggleMobileMenu()"></div>
+    <div class="mobile-menu" id="mobileMenu">
+        <div class="mobile-menu-header">
+            <strong>T. Disney Trucking</strong>
+            <button class="mobile-menu-close" onclick="toggleMobileMenu()">&times;</button>
+        </div>
+        <div class="mobile-menu-user" id="mobileUserName"></div>
+        <div class="mobile-menu-items">
+            <button onclick="showView('dashboard');toggleMobileMenu();">&#128202; Dashboard</button>
+            <button onclick="showView('tools');toggleMobileMenu();">&#9881; Tools</button>
+            <button onclick="handleCopyQuote();toggleMobileMenu();">&#128203; Copy Quote</button>
+            <button onclick="handleDeleteQuote();toggleMobileMenu();">&#128465; Delete Quote</button>
+            <button onclick="handlePrintQuote();toggleMobileMenu();">&#128424; Print Quote</button>
+            <button onclick="signOut();toggleMobileMenu();">Sign Out</button>
+        </div>
+    </div>
+
     <!-- Status -->
     <div id="statusBar" class="status-bar no-print"></div>
 
@@ -520,7 +638,7 @@
                 <h1>&#128640; Quote Dashboard</h1>
                 <div class="dash-welcome">Welcome back, <span id="dashUserName"></span>! Here's your overview.</div>
             </div>
-            <button class="quick-btn" style="background: linear-gradient(135deg, #C00000, #ff4444); color:#fff;" onclick="toggleDashboard()">&#10010; Create Quote</button>
+            <button class="quick-btn" style="background: linear-gradient(135deg, #C00000, #ff4444); color:#fff;" onclick="handleNewQuote(); showView('quote');">&#10010; Create Quote</button>
         </div>
 
         <!-- Stats Cards -->
@@ -550,7 +668,6 @@
 
         <!-- Quick Actions -->
         <div class="dash-quick-actions">
-            <button class="quick-btn quick-btn-new" onclick="toggleDashboard(); handleNewQuote();">&#10010; New Quote</button>
             <button class="quick-btn quick-btn-search" onclick="openSearchModal()">&#128269; Search All Quotes</button>
         </div>
 
@@ -570,7 +687,7 @@
                 </div>
             </div>
             <div id="dashRecentContent">
-                <table class="dash-table">
+                <div class="dash-table-wrap"><table class="dash-table">
                     <thead>
                         <tr>
                             <th class="sortable" data-sort="quoteNumber" onclick="sortDashTable('quoteNumber')">Quote # <span class="sort-arrow" id="sort-quoteNumber"></span></th>
@@ -648,6 +765,10 @@
                         <label>Address Line 2</label>
                         <input type="text" id="customerAddr2" placeholder="City, State ZIP">
                     </div>
+                    <div class="info-field">
+                        <label>Email</label>
+                        <input type="email" id="customerEmail" placeholder="customer@email.com" onblur="promptSaveCustomerEmail()">
+                    </div>
                 </div>
                 <!-- Job -->
                 <div class="info-section">
@@ -700,7 +821,7 @@
             </div>
 
             <!-- Line Items Table -->
-            <table class="line-table" id="quoteTable">
+            <div class="table-scroll-wrapper"><table class="line-table" id="quoteTable">
                 <thead>
                     <tr>
                         <th class="col-hauled">HAULED FROM</th>
@@ -712,7 +833,7 @@
                     </tr>
                 </thead>
                 <tbody id="lineItemsBody"></tbody>
-            </table>
+            </table></div>
 
             <!-- Signature -->
             <div class="signature-section">
@@ -865,6 +986,7 @@
                 <div class="form-group"><label>Customer Name</label><input type="text" id="customerFormName" placeholder="e.g., 4M Materials"></div>
                 <div class="form-group"><label>Address Line 1</label><input type="text" id="customerFormAddr1" placeholder="e.g., 3125 Dora St"></div>
                 <div class="form-group"><label>Address Line 2</label><input type="text" id="customerFormAddr2" placeholder="e.g., Fort Myers, FL 33916"></div>
+                <div class="form-group"><label>Email</label><input type="email" id="customerFormEmail" placeholder="e.g., contact@company.com"></div>
             </div>
             <div class="tools-form-actions">
                 <button class="btn-form-cancel" onclick="closeCustomerForm()">Cancel</button>
@@ -903,7 +1025,7 @@ const msalConfig = {
     }
 };
 
-const graphScopes = ["Files.ReadWrite.All", "Sites.ReadWrite.All", "User.Read", "Mail.ReadWrite"];
+const graphScopes = ["Files.ReadWrite.All", "Sites.ReadWrite.All", "User.Read", "Mail.ReadWrite", "Mail.Send"];
 
 const driveId = "b!TPqAcGPQcEGtQwdXSUltla7kgkyjSydDiw77YGuYjOp24PuGcU4_T4_FWyisLZdY";
 const folderId = "01OYENQWBAYNQOU4HVFVGKAGVV56JQF465";
@@ -1235,7 +1357,7 @@ async function saveQuote() {
         await saveQuoteIndex();
 
         // Auto-add customer to customer list
-        autoAddCustomer(customerName, document.getElementById('customerAddr1').value, document.getElementById('customerAddr2').value);
+        autoAddCustomer(customerName, document.getElementById('customerAddr1').value, document.getElementById('customerAddr2').value, document.getElementById('customerEmail').value);
 
         showStatus('Saved! ' + baseFileName + '.pdf and .xlsx uploaded to OneDrive.', 'success');
     } catch (error) {
@@ -1883,45 +2005,137 @@ async function handleEmailQuote() {
     const quoteNumber = document.getElementById('quoteNumber').value;
     const jobName = document.getElementById('jobName').value || 'your project';
     const customerName = document.getElementById('customerName').value || 'Customer';
+    const customerEmail = document.getElementById('customerEmail').value.trim();
     const quotedBy = document.getElementById('quotedBy').value;
 
-    const subject = encodeURIComponent('Quote Number ' + quoteNumber + ' for ' + jobName + ' from T. Disney Trucking');
-    const body = encodeURIComponent(
-        'Good morning,\r\n\r\n' +
-        'Please find the attached quote for ' + jobName + '. ' +
-        'Let me know if you have any questions or need to add any additional items. ' +
-        'We look forward to working on this project together!\r\n\r\n' +
-        'Thank you!'
-    );
+    // Require customer email
+    if (!customerEmail) {
+        showStatus('Please enter a customer email address before sending.', 'error');
+        document.getElementById('customerEmail').focus();
+        return;
+    }
 
-    // Save PDF to Downloads so user can attach it in Outlook
-    showStatus('Generating PDF for attachment...', 'info');
+    // Get the sales rep email for CC
+    var rep = salesReps.find(function(r) { return r.name === quotedBy; });
+    var repEmail = rep ? rep.email : '';
+
+    showStatus('Generating PDF and sending email...', 'info');
+    var btnEmail = document.getElementById('btnEmail');
+    btnEmail.disabled = true;
+    btnEmail.innerHTML = '&#9993; Sending...';
+
     try {
+        // Generate PDF
         var pdfBlob = await generatePDF();
         var baseName = customerName + '  _ ' + jobName + ' _ ' + formatDateForFile(new Date());
 
-        // Download PDF locally so it's easy to attach
-        var pdfUrl = URL.createObjectURL(pdfBlob);
-        var a = document.createElement('a');
-        a.href = pdfUrl;
-        a.download = baseName + '.pdf';
-        a.click();
-        URL.revokeObjectURL(pdfUrl);
+        // Convert blob to base64
+        var base64 = await blobToBase64(pdfBlob);
 
-        // Also try to save to OneDrive in background
+        // Get fresh token
+        await getToken();
+
+        // Build email message
+        var emailSubject = 'Quote Number ' + quoteNumber + ' for ' + jobName + ' from T. Disney Trucking';
+        var emailBody = '<p>Good morning,</p>' +
+            '<p>Please find the attached quote for <strong>' + jobName + '</strong>. ' +
+            'Let me know if you have any questions or need to add any additional items. ' +
+            'We look forward to working on this project together!</p>' +
+            '<p>Thank you!</p>';
+
+        var message = {
+            message: {
+                subject: emailSubject,
+                body: { contentType: 'HTML', content: emailBody },
+                toRecipients: [{ emailAddress: { address: customerEmail, name: customerName } }],
+                attachments: [{
+                    '@odata.type': '#microsoft.graph.fileAttachment',
+                    name: baseName + '.pdf',
+                    contentType: 'application/pdf',
+                    contentBytes: base64
+                }]
+            }
+        };
+
+        // Add CC for the sales rep (if different from sender)
+        if (repEmail) {
+            message.message.ccRecipients = [{ emailAddress: { address: repEmail, name: quotedBy } }];
+        }
+
+        // Send via Microsoft Graph
+        var sendResponse = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + accessToken,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(message)
+        });
+
+        if (!sendResponse.ok) {
+            var errText = await sendResponse.text();
+            throw new Error('Send failed (' + sendResponse.status + '): ' + errText);
+        }
+
+        // Also save PDF to OneDrive in background
         try {
-            await getToken();
             await uploadToOneDrive(baseName + '.pdf', pdfBlob, 'application/pdf');
         } catch (e) { console.log('OneDrive save during email:', e); }
 
-        showStatus('PDF downloaded! Attach it to your email from your Downloads folder.', 'success');
-    } catch (error) {
-        console.log('PDF generation for email failed:', error);
-        showStatus('Opening Outlook - generate PDF separately to attach.', 'info');
-    }
+        showStatus('Quote emailed to ' + customerEmail + '!', 'success');
 
-    // Open desktop Outlook via mailto
-    window.location.href = 'mailto:?subject=' + subject + '&body=' + body;
+    } catch (error) {
+        console.error('Email send error:', error);
+        // Fallback to mailto approach
+        showStatus('Direct email failed. Downloading PDF - please attach manually.', 'error');
+        try {
+            var pdfBlob2 = await generatePDF();
+            var baseName2 = customerName + '  _ ' + jobName + ' _ ' + formatDateForFile(new Date());
+            var pdfUrl = URL.createObjectURL(pdfBlob2);
+            var a = document.createElement('a');
+            a.href = pdfUrl;
+            a.download = baseName2 + '.pdf';
+            a.click();
+            URL.revokeObjectURL(pdfUrl);
+        } catch (e2) { console.log('PDF fallback failed:', e2); }
+
+        var subjectEnc = encodeURIComponent('Quote Number ' + quoteNumber + ' for ' + jobName + ' from T. Disney Trucking');
+        var bodyEnc = encodeURIComponent('Good morning,\r\n\r\nPlease find the attached quote for ' + jobName + '. Let me know if you have any questions or need to add any additional items. We look forward to working on this project together!\r\n\r\nThank you!');
+        window.location.href = 'mailto:' + encodeURIComponent(customerEmail) + '?subject=' + subjectEnc + '&body=' + bodyEnc;
+    } finally {
+        btnEmail.disabled = false;
+        btnEmail.innerHTML = '&#9993; Email';
+    }
+}
+
+// Convert blob to base64 string (without data URI prefix)
+function blobToBase64(blob) {
+    return new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onloadend = function() {
+            // Remove "data:application/pdf;base64," prefix
+            var base64 = reader.result.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+// Prompt to save customer email if new
+function promptSaveCustomerEmail() {
+    var name = document.getElementById('customerName').value.trim();
+    var email = document.getElementById('customerEmail').value.trim();
+    if (!name || !email) return;
+
+    var existing = customerList.find(function(c) { return c.name.toLowerCase() === name.toLowerCase(); });
+    if (existing && !existing.email && email) {
+        if (confirm('Save email "' + email + '" for ' + name + '?')) {
+            existing.email = email;
+            saveToolsCustomers();
+            showStatus('Email saved for ' + name, 'success');
+        }
+    }
 }
 
 // =============================================
@@ -1942,7 +2156,7 @@ async function handleNewQuote() {
         document.getElementById('quoteNumber').value = newNum;
 
         // Clear all fields
-        ['customerName', 'customerAddr1', 'customerAddr2', 'jobName', 'jobAddr1', 'jobAddr2'].forEach(function(id) {
+        ['customerName', 'customerAddr1', 'customerAddr2', 'customerEmail', 'jobName', 'jobAddr1', 'jobAddr2'].forEach(function(id) {
             document.getElementById(id).value = '';
         });
 
@@ -2053,6 +2267,7 @@ function getQuoteDataFromForm() {
         customerName: document.getElementById('customerName').value,
         customerAddr1: document.getElementById('customerAddr1').value,
         customerAddr2: document.getElementById('customerAddr2').value,
+        customerEmail: document.getElementById('customerEmail').value,
         jobName: document.getElementById('jobName').value,
         jobAddr1: document.getElementById('jobAddr1').value,
         jobAddr2: document.getElementById('jobAddr2').value,
@@ -2070,6 +2285,7 @@ function loadQuoteDataToForm(data) {
     document.getElementById('customerName').value = data.customerName || '';
     document.getElementById('customerAddr1').value = data.customerAddr1 || '';
     document.getElementById('customerAddr2').value = data.customerAddr2 || '';
+    document.getElementById('customerEmail').value = data.customerEmail || '';
     document.getElementById('jobName').value = data.jobName || '';
     document.getElementById('jobAddr1').value = data.jobAddr1 || '';
     document.getElementById('jobAddr2').value = data.jobAddr2 || '';
@@ -2292,7 +2508,7 @@ async function handleDeleteQuote() {
         showStatus('Quote #' + quoteNum + ' deleted. ' + (deleted || 0) + ' file(s) removed from OneDrive.', 'success');
 
         // Clear form fields
-        ['customerName', 'customerAddr1', 'customerAddr2', 'jobName', 'jobAddr1', 'jobAddr2'].forEach(function(id) {
+        ['customerName', 'customerAddr1', 'customerAddr2', 'customerEmail', 'jobName', 'jobAddr1', 'jobAddr2'].forEach(function(id) {
             document.getElementById(id).value = '';
         });
         for (var r = 0; r < 16; r++) {
@@ -2938,7 +3154,7 @@ function renderCustomerList() {
         div.innerHTML =
             '<div class="item-info">' +
             '<div class="item-name">' + cust.name + '</div>' +
-            '<div class="item-detail">' + (cust.addr1 || '') + (cust.addr2 ? ', ' + cust.addr2 : '') + '</div>' +
+            '<div class="item-detail">' + (cust.addr1 || '') + (cust.addr2 ? ', ' + cust.addr2 : '') + (cust.email ? ' &bull; ' + cust.email : '') + '</div>' +
             '</div>' +
             '<div class="item-actions">' +
             '<button class="btn-icon btn-icon-edit" onclick="openCustomerForm(' + realIdx + ')" title="Edit">&#9998;</button>' +
@@ -2957,12 +3173,14 @@ function openCustomerForm(idx) {
         document.getElementById('customerFormName').value = cust.name || '';
         document.getElementById('customerFormAddr1').value = cust.addr1 || '';
         document.getElementById('customerFormAddr2').value = cust.addr2 || '';
+        document.getElementById('customerFormEmail').value = cust.email || '';
     } else {
         document.getElementById('customerFormTitle').textContent = 'Add Customer';
         document.getElementById('customerFormIndex').value = -1;
         document.getElementById('customerFormName').value = '';
         document.getElementById('customerFormAddr1').value = '';
         document.getElementById('customerFormAddr2').value = '';
+        document.getElementById('customerFormEmail').value = '';
     }
     document.getElementById('customerFormName').focus();
 }
@@ -2976,7 +3194,8 @@ async function saveCustomerForm() {
     var cust = {
         name: document.getElementById('customerFormName').value.trim(),
         addr1: document.getElementById('customerFormAddr1').value.trim(),
-        addr2: document.getElementById('customerFormAddr2').value.trim()
+        addr2: document.getElementById('customerFormAddr2').value.trim(),
+        email: document.getElementById('customerFormEmail').value.trim()
     };
     if (!cust.name) { alert('Please enter a customer name.'); return; }
 
@@ -3136,19 +3355,20 @@ function parseCSVLine(line) {
 }
 
 // Auto-add customer to list when saving a quote (if not already there)
-function autoAddCustomer(name, addr1, addr2) {
+function autoAddCustomer(name, addr1, addr2, email) {
     if (!name) return;
     var exists = customerList.some(function(c) { return c.name.toLowerCase() === name.toLowerCase(); });
     if (!exists) {
-        customerList.push({ name: name, addr1: addr1 || '', addr2: addr2 || '' });
+        customerList.push({ name: name, addr1: addr1 || '', addr2: addr2 || '', email: email || '' });
         customerList.sort(function(a, b) { return a.name.localeCompare(b.name); });
         saveToolsCustomers(); // fire and forget
     } else {
-        // Update address if it changed
+        // Update address/email if changed
         var existing = customerList.find(function(c) { return c.name.toLowerCase() === name.toLowerCase(); });
-        if (existing && (addr1 || addr2)) {
+        if (existing) {
             if (addr1) existing.addr1 = addr1;
             if (addr2) existing.addr2 = addr2;
+            if (email) existing.email = email;
             saveToolsCustomers();
         }
     }
@@ -3178,6 +3398,7 @@ function showCustomerSuggestions(query) {
             document.getElementById('customerName').value = c.name;
             document.getElementById('customerAddr1').value = c.addr1 || '';
             document.getElementById('customerAddr2').value = c.addr2 || '';
+            document.getElementById('customerEmail').value = c.email || '';
             list.classList.remove('active');
         };
         list.appendChild(div);
@@ -3200,6 +3421,34 @@ document.addEventListener('keydown', function(e) {
         closeCustomerForm();
     }
 });
+
+// =============================================
+// MOBILE MENU
+// =============================================
+function toggleMobileMenu() {
+    var menu = document.getElementById('mobileMenu');
+    var overlay = document.getElementById('mobileMenuOverlay');
+    menu.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+// Close mobile menu on Escape
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        var menu = document.getElementById('mobileMenu');
+        if (menu && menu.classList.contains('active')) {
+            toggleMobileMenu();
+        }
+    }
+});
+
+// Update mobile menu username when app loads
+function updateMobileUserName(name) {
+    var el = document.getElementById('mobileUserName');
+    if (el) el.textContent = name || '';
+}
+
+
 </script>
 </body>
 </html>
