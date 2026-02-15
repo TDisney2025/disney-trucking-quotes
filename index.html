@@ -247,6 +247,9 @@
         .autocomplete-item .ac-name { font-weight: 700; font-size: 13px; color: #333; }
         .autocomplete-item .ac-addr { font-size: 11px; color: #888; }
 
+        /* ---- Validation Error ---- */
+        .validation-error { border: 2px solid #dc3545 !important; background: #fff5f5 !important; }
+
         /* ---- Search Modal ---- */
         .modal-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -272,7 +275,7 @@
         .search-input:focus { outline: none; border-color: #C00000; }
         .search-results { max-height: 50vh; overflow-y: auto; }
         .search-row {
-            display: grid; grid-template-columns: 70px 1fr 1fr 100px 80px;
+            display: grid; grid-template-columns: 70px 1fr 1fr 100px 80px 55px;
             gap: 8px; padding: 10px 8px; border-bottom: 1px solid #eee; cursor: pointer;
             align-items: center; font-size: 13px; transition: background 0.15s;
         }
@@ -380,7 +383,7 @@
         }
         .line-table th:first-child, .line-table th:nth-child(2) { text-align: left; }
         .line-table td {
-            border: 1px solid #ccc; padding: 0; height: 20px;
+            border: 1px solid #ccc; padding: 0; height: 20px; overflow: visible; position: relative;
         }
         .line-table td input, .line-table td select {
             width: 100%; height: 100%; border: none; padding: 1px 4px;
@@ -556,6 +559,7 @@
             .search-row span:nth-child(3) { font-size: 12px; color: #555; }
             .search-row span:nth-child(4) { display: none !important; }
             .search-row span:nth-child(5) { font-size: 11px; color: #888; }
+            .search-row span:nth-child(6) { font-size: 11px; }
             .search-row-header { display: none !important; }
             .search-input { font-size: 16px !important; }
             .search-results { max-height: calc(100vh - 220px); }
@@ -712,6 +716,7 @@
                             <th class="sortable" data-sort="jobName" onclick="sortDashTable('jobName')">Job <span class="sort-arrow" id="sort-jobName"></span></th>
                             <th class="sortable" data-sort="quotedBy" onclick="sortDashTable('quotedBy')">Quoted By <span class="sort-arrow" id="sort-quotedBy"></span></th>
                             <th class="sortable" data-sort="date" onclick="sortDashTable('date')">Date <span class="sort-arrow" id="sort-date"></span></th>
+                            <th>Status</th>
                             <th style="width:50px;"></th>
                         </tr>
                     </thead>
@@ -761,6 +766,9 @@
                         <label>Quote #:</label>
                         <input type="text" id="quoteNumber" value="10578">
                     </div>
+                    <div id="quoteStatusBadge" style="text-align:right;margin-top:2px;">
+                        <span id="statusBadgeText" style="display:inline-block;padding:2px 10px;border-radius:50px;font-size:10px;font-weight:700;background:#fff3cd;color:#856404;">Draft</span>
+                    </div>
                 </div>
             </div>
 
@@ -771,8 +779,11 @@
                     <div class="info-section-title">Customer</div>
                     <div class="info-field autocomplete-wrapper">
                         <label>Customer Name</label>
-                        <input type="text" id="customerName" onblur="applySmartTitleCase(this)" oninput="showCustomerSuggestions(this.value)" autocomplete="off" placeholder="Customer Name">
+                        <input type="text" id="customerName" onblur="applySmartTitleCase(this); updateCustomerHistoryLink(this.value)" oninput="showCustomerSuggestions(this.value)" autocomplete="off" placeholder="Customer Name">
                         <div class="autocomplete-list" id="customerAutocomplete"></div>
+                    </div>
+                    <div id="customerHistoryLink" style="display:none;margin-top:2px;">
+                        <a href="#" onclick="showCustomerHistory(); return false;" style="font-size:11px;color:#667eea;text-decoration:none;font-weight:600;" id="customerHistoryText">View past quotes</a>
                     </div>
                     <div class="info-field">
                         <label>Address Line 1</label>
@@ -893,7 +904,7 @@
                 <button class="modal-close" onclick="closeSearchModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <input type="text" class="search-input" id="searchInput" placeholder="Search by quote #, customer, job name..." oninput="filterSearchResults()">
+                <input type="text" class="search-input" id="searchInput" placeholder="Search by quote #, customer, job name..." oninput="debouncedFilterSearch()">
                 <div style="display:flex;gap:10px;margin:8px 0 4px;flex-wrap:wrap;align-items:center;">
                     <select id="searchRepFilter" onchange="filterSearchResults()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#333;background:#fff;outline:none;min-width:150px;">
                         <option value="">All Reps</option>
@@ -915,6 +926,7 @@
                         <span>Job</span>
                         <span>Quoted By</span>
                         <span>Date</span>
+                        <span>Status</span>
                     </div>
                     <div id="searchResultsList"></div>
                 </div>
@@ -954,6 +966,28 @@
                 <div class="tools-card-body">
                     <input type="text" class="search-input" id="toolsCustomerSearch" placeholder="Search customers..." oninput="renderCustomerList()" style="margin-bottom:10px;">
                     <div id="customersList"></div>
+                </div>
+            </div>
+            <!-- Vendors Card -->
+            <div class="tools-card">
+                <div class="tools-card-header">
+                    <h2>&#128666; Vendors <span id="vendorCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
+                    <button class="btn-add-item" onclick="openVendorForm()">&#10010; Add Vendor</button>
+                </div>
+                <div class="tools-card-body">
+                    <input type="text" class="search-input" id="toolsVendorSearch" placeholder="Search vendors..." oninput="renderVendorList()" style="margin-bottom:10px;">
+                    <div id="vendorsList"></div>
+                </div>
+            </div>
+            <!-- Items / Services Card -->
+            <div class="tools-card">
+                <div class="tools-card-header">
+                    <h2>&#128230; Items / Services <span id="serviceCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
+                    <button class="btn-add-item" onclick="openServiceForm()">&#10010; Add Item</button>
+                </div>
+                <div class="tools-card-body">
+                    <input type="text" class="search-input" id="toolsServiceSearch" placeholder="Search items/services..." oninput="renderServiceList()" style="margin-bottom:10px;">
+                    <div id="servicesList"></div>
                 </div>
             </div>
             <!-- Utilities Card -->
@@ -1012,6 +1046,55 @@
         </div>
     </div>
 
+    <!-- Vendor Form Modal -->
+    <div class="tools-form-overlay" id="vendorFormOverlay">
+        <div class="tools-form-box">
+            <div class="tools-form-header">
+                <h3 id="vendorFormTitle">Add Vendor</h3>
+                <button class="modal-close" onclick="closeVendorForm()">&times;</button>
+            </div>
+            <div class="tools-form-body">
+                <input type="hidden" id="vendorFormIndex" value="-1">
+                <div class="form-group"><label>Vendor Name</label><input type="text" id="vendorFormName" placeholder="e.g., Vulcan Materials"></div>
+            </div>
+            <div class="tools-form-actions">
+                <button class="btn-form-cancel" onclick="closeVendorForm()">Cancel</button>
+                <button class="btn-form-save" onclick="saveVendorForm()">Save Vendor</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Service Form Modal -->
+    <div class="tools-form-overlay" id="serviceFormOverlay">
+        <div class="tools-form-box">
+            <div class="tools-form-header">
+                <h3 id="serviceFormTitle">Add Item / Service</h3>
+                <button class="modal-close" onclick="closeServiceForm()">&times;</button>
+            </div>
+            <div class="tools-form-body">
+                <input type="hidden" id="serviceFormIndex" value="-1">
+                <div class="form-group"><label>Item / Service Name</label><input type="text" id="serviceFormName" placeholder="e.g., Fill Dirt"></div>
+            </div>
+            <div class="tools-form-actions">
+                <button class="btn-form-cancel" onclick="closeServiceForm()">Cancel</button>
+                <button class="btn-form-save" onclick="saveServiceForm()">Save Item</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer History Modal -->
+    <div class="modal-overlay" id="customerHistoryModal">
+        <div class="modal-box" style="max-width:600px;">
+            <div class="modal-header">
+                <h3 id="customerHistoryTitle">&#128203; Customer Quote History</h3>
+                <button class="modal-close" onclick="closeCustomerHistory()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="customerHistoryList" style="max-height:60vh;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+
 </div><!-- /appSection -->
 
 <script>
@@ -1057,6 +1140,9 @@ var salesReps = [
     { name: 'Yoel Alonso', email: 'Yoel@disneytrucking.com', company: 'T. Disney Trucking & Grading, Inc.', address: '6324 US HWY 301 S, Riverview, FL 33578', phone: '(844) 258-7825' }
 ];
 var customerList = []; // Will be loaded from OneDrive
+var vendorList = [];   // Will be loaded from OneDrive
+var serviceList = [];  // Will be loaded from OneDrive
+var currentQuoteStatus = 'Draft'; // Track status of currently loaded quote
 
 // Backward compatibility helper
 var salesRepEmails = {};
@@ -1199,6 +1285,17 @@ function showLoginError(msg) {
 // =============================================
 async function loadQuoteNumber() {
     try {
+        // Get file metadata (with ETag for concurrency control)
+        var trackerETag = null;
+        try {
+            const metaUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-tracker.json`;
+            const metaResp = await fetch(metaUrl, { headers: { "Authorization": `Bearer ${accessToken}` } });
+            if (metaResp.ok) {
+                var meta = await metaResp.json();
+                trackerETag = meta.eTag || meta['@odata.etag'] || null;
+            }
+        } catch (e) {}
+
         const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-tracker.json:/content`;
         const response = await fetch(url, {
             headers: { "Authorization": `Bearer ${accessToken}` }
@@ -1206,28 +1303,38 @@ async function loadQuoteNumber() {
         if (response.ok) {
             const data = await response.json();
             document.getElementById("quoteNumber").value = data.nextQuoteNumber || 10578;
+            return { nextQuoteNumber: data.nextQuoteNumber || 10578, etag: trackerETag };
         }
+        return { nextQuoteNumber: 10578, etag: null };
     } catch (error) {
         console.log("No existing quote tracker found, using default 10578");
+        return { nextQuoteNumber: 10578, etag: null };
     }
 }
 
-async function saveQuoteNumber(nextNumber) {
-    try {
-        const data = JSON.stringify({
-            nextQuoteNumber: nextNumber,
-            lastUpdated: new Date().toISOString()
-        });
-        const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-tracker.json:/content`;
-        await fetch(url, {
-            method: "PUT",
-            headers: {
-                "Authorization": `Bearer ${accessToken}`,
-                "Content-Type": "application/json"
-            },
-            body: data
-        });
-    } catch (error) {
+async function saveQuoteNumber(nextNumber, etag) {
+    var headers = {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+    };
+    if (etag) headers["If-Match"] = etag;
+
+    const data = JSON.stringify({
+        nextQuoteNumber: nextNumber,
+        lastUpdated: new Date().toISOString()
+    });
+    const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-tracker.json:/content`;
+    var response = await fetch(url, {
+        method: "PUT",
+        headers: headers,
+        body: data
+    });
+    if (response.status === 412) throw new Error("CONFLICT");
+    if (!response.ok) {
+        var errText = await response.text();
+        throw new Error("Save tracker failed: " + response.status);
+    }
+    try { /* no-op */ } catch (error) {
         console.error("Error saving quote number:", error);
     }
 }
@@ -1301,10 +1408,10 @@ function generateLineItems() {
     for (let i = 0; i < 16; i++) {
         const row = document.createElement('tr');
         row.innerHTML =
-            '<td><input type="text" id="hauledFrom_' + i + '" onblur="applySmartTitleCase(this)"></td>' +
-            '<td><input type="text" id="itemService_' + i + '" onblur="applySmartTitleCase(this)"></td>' +
-            '<td><input type="text" id="material_' + i + '" class="money-input" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
-            '<td><input type="text" id="haul_' + i + '" class="money-input" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
+            '<td class="autocomplete-wrapper"><input type="text" id="hauledFrom_' + i + '" onblur="applySmartTitleCase(this); promptSaveVendor(this)" oninput="showVendorSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="vendorAC_' + i + '"></div></td>' +
+            '<td class="autocomplete-wrapper"><input type="text" id="itemService_' + i + '" onblur="applySmartTitleCase(this); promptSaveService(this)" oninput="showServiceSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="serviceAC_' + i + '"></div></td>' +
+            '<td><input type="text" id="material_' + i + '" class="money-input" inputmode="decimal" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
+            '<td><input type="text" id="haul_' + i + '" class="money-input" inputmode="decimal" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
             '<td><select id="unit_' + i + '"><option value=""></option><option value="Ton">Ton</option><option value="Load">Load</option><option value="Yard">Yard</option><option value="Hourly">Hourly</option></select></td>' +
             '<td class="total-cell" id="total_' + i + '"></td>';
         tbody.appendChild(row);
@@ -1344,6 +1451,11 @@ function calculateTotal(rowIndex) {
 // SAVE TO ONEDRIVE (PDF + Excel)
 // =============================================
 async function saveQuote() {
+    // Validate form before saving
+    if (!validateQuoteForm()) return;
+    // Check for duplicate quotes
+    if (!checkDuplicateQuote()) return;
+
     const saveBtn = document.getElementById('saveBtn');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
@@ -2031,6 +2143,9 @@ async function handleEmailQuote() {
     const customerEmail = document.getElementById('customerEmail').value.trim();
     const quotedBy = document.getElementById('quotedBy').value;
 
+    // Validate form before emailing
+    if (!validateQuoteForm()) return;
+
     // Require customer email
     if (!customerEmail) {
         showStatus('Please enter a customer email address before sending.', 'error');
@@ -2128,6 +2243,15 @@ async function handleEmailQuote() {
 
         showStatus('Quote emailed to ' + customerEmail + '!', 'success');
 
+        // Mark quote as Sent and save to index
+        currentQuoteStatus = 'Sent';
+        updateStatusBadge();
+        try {
+            if (quoteIndex.length === 0) await loadQuoteIndex();
+            addQuoteToIndex(getQuoteDataFromForm());
+            await saveQuoteIndex();
+        } catch (e) { console.log('Status save after email:', e); }
+
     } catch (error) {
         console.error('Email send error:', error);
         // Fallback to mailto approach
@@ -2189,13 +2313,23 @@ async function handleNewQuote() {
     // No confirmation — just create new quote immediately
 
     try {
-        // ALWAYS read from OneDrive tracker — never from the form field
+        // ALWAYS read from OneDrive tracker with optimistic concurrency
         await getToken();
-        await loadQuoteNumber();
-        const newNum = parseInt(document.getElementById('quoteNumber').value) || 10578;
-
-        // Save the NEXT number (one after the new current)
-        await saveQuoteNumber(newNum + 1);
+        var newNum;
+        for (var attempt = 0; attempt < 3; attempt++) {
+            var tracker = await loadQuoteNumber();
+            newNum = tracker.nextQuoteNumber;
+            try {
+                await saveQuoteNumber(newNum + 1, tracker.etag);
+                break;
+            } catch (e) {
+                if (e.message === 'CONFLICT' && attempt < 2) {
+                    await new Promise(function(r) { setTimeout(r, 500 + Math.random() * 500); });
+                    continue;
+                }
+                throw e;
+            }
+        }
 
         // Set new quote number
         document.getElementById('quoteNumber').value = newNum;
@@ -2223,6 +2357,8 @@ async function handleNewQuote() {
             document.getElementById('total_' + i).textContent = '';
         }
 
+        currentQuoteStatus = 'Draft';
+        updateStatusBadge();
         showStatus('New quote #' + newNum + ' created.', 'success');
     } catch (error) {
         console.error('New quote error:', error);
@@ -2246,6 +2382,20 @@ function showStatus(message, type) {
             bar.style.display = 'none';
             bar.className = 'status-bar no-print';
         }, 5000);
+    }
+}
+
+function updateStatusBadge() {
+    var badge = document.getElementById('statusBadgeText');
+    if (!badge) return;
+    if (currentQuoteStatus === 'Sent') {
+        badge.textContent = 'Sent';
+        badge.style.background = '#d4edda';
+        badge.style.color = '#155724';
+    } else {
+        badge.textContent = 'Draft';
+        badge.style.background = '#fff3cd';
+        badge.style.color = '#856404';
     }
 }
 
@@ -2341,7 +2491,8 @@ function getQuoteDataFromForm() {
         date: document.getElementById('dateField').textContent,
         validThrough: document.getElementById('validThrough').textContent,
         lineItems: lineItems,
-        savedDate: new Date().toISOString()
+        savedDate: new Date().toISOString(),
+        status: currentQuoteStatus || 'Draft'
     };
 }
 
@@ -2383,6 +2534,13 @@ function loadQuoteDataToForm(data) {
             }
         });
     }
+
+    // Load status
+    currentQuoteStatus = data.status || 'Draft';
+    updateStatusBadge();
+
+    // Update customer history link
+    if (typeof updateCustomerHistoryLink === 'function') updateCustomerHistoryLink(data.customerName);
 }
 
 // =============================================
@@ -2433,6 +2591,12 @@ function clearSearchFilters() {
     document.getElementById('searchRepFilter').value = '';
     document.getElementById('searchDateFilter').value = '';
     filterSearchResults();
+}
+
+var searchDebounceTimer = null;
+function debouncedFilterSearch() {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(filterSearchResults, 300);
 }
 
 function filterSearchResults() {
@@ -2486,7 +2650,8 @@ function filterSearchResults() {
             '<span>' + (q.customerName || '') + '</span>' +
             '<span>' + (q.jobName || '') + '</span>' +
             '<span style="font-size:12px;">' + (q.quotedBy || '') + '</span>' +
-            '<span style="font-size:12px;color:#888;">' + (q.date || '') + '</span>';
+            '<span style="font-size:12px;color:#888;">' + (q.date || '') + '</span>' +
+            '<span>' + ((q.status || 'Draft') === 'Sent' ? '<span style="padding:2px 6px;border-radius:50px;font-size:10px;font-weight:700;background:#d4edda;color:#155724;">Sent</span>' : '<span style="padding:2px 6px;border-radius:50px;font-size:10px;font-weight:700;background:#fff3cd;color:#856404;">Draft</span>') + '</span>';
         row.onclick = function() {
             loadQuoteDataToForm(q);
             closeSearchModal();
@@ -2508,13 +2673,23 @@ async function handleCopyQuote() {
     // No confirmation — just copy quote immediately
 
     try {
-        // ALWAYS read from OneDrive tracker — never from the form field
+        // ALWAYS read from OneDrive tracker with optimistic concurrency
         await getToken();
-        await loadQuoteNumber();
-        const newNum = parseInt(document.getElementById('quoteNumber').value) || 10578;
-
-        // Save the NEXT number
-        await saveQuoteNumber(newNum + 1);
+        var newNum;
+        for (var attempt = 0; attempt < 3; attempt++) {
+            var tracker = await loadQuoteNumber();
+            newNum = tracker.nextQuoteNumber;
+            try {
+                await saveQuoteNumber(newNum + 1, tracker.etag);
+                break;
+            } catch (e) {
+                if (e.message === 'CONFLICT' && attempt < 2) {
+                    await new Promise(function(r) { setTimeout(r, 500 + Math.random() * 500); });
+                    continue;
+                }
+                throw e;
+            }
+        }
 
         // Set new quote number (keep all other data)
         document.getElementById('quoteNumber').value = newNum;
@@ -2522,6 +2697,8 @@ async function handleCopyQuote() {
         // Update dates to today
         initializeDates();
 
+        currentQuoteStatus = 'Draft';
+        updateStatusBadge();
         showStatus('Quote copied! New quote #' + newNum + ' created with same data.', 'success');
     } catch (error) {
         console.error('Copy quote error:', error);
@@ -2627,6 +2804,8 @@ function showView(view) {
         toolsView.classList.add('active');
         renderRepsList();
         renderCustomerList();
+        renderVendorList();
+        renderServiceList();
     } else {
         quoteView.style.display = 'flex';
     }
@@ -2821,6 +3000,7 @@ function renderDashRows(quotes) {
             '<td>' + (q.jobName || '') + '</td>' +
             '<td>' + getRepBadge(q.quotedBy || '') + '</td>' +
             '<td class="date-cell">' + (q.date || '') + '</td>' +
+            '<td>' + ((q.status || 'Draft') === 'Sent' ? '<span style="padding:2px 8px;border-radius:50px;font-size:10px;font-weight:700;background:#d4edda;color:#155724;">Sent</span>' : '<span style="padding:2px 8px;border-radius:50px;font-size:10px;font-weight:700;background:#fff3cd;color:#856404;">Draft</span>') + '</td>' +
             '<td style="white-space:nowrap;">' +
             '<button class="btn-row-action" title="Print preview" onclick="event.stopPropagation(); dashPrintQuote(\'' + (q.quoteNumber || '') + '\');">&#128424;</button>' +
             '<button class="btn-row-delete" title="Delete quote" onclick="event.stopPropagation(); dashDeleteQuote(\'' + (q.quoteNumber || '') + '\');">&#128465;</button>' +
@@ -3042,6 +3222,18 @@ async function loadToolsData() {
         if (custResp.ok) {
             customerList = await custResp.json();
         }
+        // Load vendor list
+        var vendUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/vendor-list.json:/content';
+        var vendResp = await fetch(vendUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (vendResp.ok) {
+            vendorList = await vendResp.json();
+        }
+        // Load service/items list
+        var svcUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/service-list.json:/content';
+        var svcResp = await fetch(svcUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (svcResp.ok) {
+            serviceList = await svcResp.json();
+        }
     } catch (e) {
         console.log('Tools data load (first time is normal):', e.message);
     }
@@ -3069,6 +3261,30 @@ async function saveToolsCustomers() {
             body: JSON.stringify(customerList)
         });
     } catch (e) { console.error('Save customers error:', e); }
+}
+
+async function saveToolsVendors() {
+    try {
+        await getToken();
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/vendor-list.json:/content';
+        await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(vendorList)
+        });
+    } catch (e) { console.error('Save vendors error:', e); }
+}
+
+async function saveToolsServices() {
+    try {
+        await getToken();
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/service-list.json:/content';
+        await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(serviceList)
+        });
+    } catch (e) { console.error('Save services error:', e); }
 }
 
 // =============================================
@@ -3391,6 +3607,418 @@ async function syncQuoteIndex() {
     }
 }
 
+// =============================================
+// VENDOR MANAGEMENT
+// =============================================
+function renderVendorList() {
+    var container = document.getElementById('vendorsList');
+    if (!container) return;
+    container.innerHTML = '';
+    var countEl = document.getElementById('vendorCount');
+    if (countEl) countEl.textContent = '(' + vendorList.length + ')';
+    var search = (document.getElementById('toolsVendorSearch') || {}).value || '';
+    search = search.toLowerCase().trim();
+
+    var filtered = vendorList;
+    if (search) {
+        filtered = vendorList.filter(function(v) {
+            return v.name && v.name.toLowerCase().indexOf(search) !== -1;
+        });
+    }
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;">' + (vendorList.length === 0 ? 'No vendors yet. Add one to get started!' : 'No matches found.') + '</div>';
+        return;
+    }
+    filtered.forEach(function(v) {
+        var realIdx = vendorList.indexOf(v);
+        var div = document.createElement('div');
+        div.className = 'tools-list-item';
+        div.innerHTML =
+            '<div class="item-info"><div class="item-name">' + v.name + '</div></div>' +
+            '<div class="item-actions">' +
+            '<button class="btn-icon btn-icon-edit" onclick="openVendorForm(' + realIdx + ')" title="Edit">&#9998;</button>' +
+            '<button class="btn-icon btn-icon-delete" onclick="deleteVendor(' + realIdx + ')" title="Delete">&#128465;</button>' +
+            '</div>';
+        container.appendChild(div);
+    });
+}
+
+function openVendorForm(idx) {
+    document.getElementById('vendorFormOverlay').classList.add('active');
+    if (typeof idx === 'number' && idx >= 0) {
+        document.getElementById('vendorFormTitle').textContent = 'Edit Vendor';
+        document.getElementById('vendorFormIndex').value = idx;
+        document.getElementById('vendorFormName').value = vendorList[idx].name || '';
+    } else {
+        document.getElementById('vendorFormTitle').textContent = 'Add Vendor';
+        document.getElementById('vendorFormIndex').value = -1;
+        document.getElementById('vendorFormName').value = '';
+    }
+    document.getElementById('vendorFormName').focus();
+}
+
+function closeVendorForm() {
+    document.getElementById('vendorFormOverlay').classList.remove('active');
+}
+
+async function saveVendorForm() {
+    var idx = parseInt(document.getElementById('vendorFormIndex').value);
+    var name = document.getElementById('vendorFormName').value.trim();
+    if (!name) { alert('Please enter a vendor name.'); return; }
+
+    if (idx >= 0) {
+        vendorList[idx].name = name;
+    } else {
+        // Check if already exists
+        var exists = vendorList.some(function(v) { return v.name.toLowerCase() === name.toLowerCase(); });
+        if (exists) { alert('Vendor "' + name + '" already exists.'); return; }
+        vendorList.push({ name: name });
+    }
+    vendorList.sort(function(a, b) { return a.name.localeCompare(b.name); });
+    renderVendorList();
+    closeVendorForm();
+    await saveToolsVendors();
+    showStatus('Vendor saved!', 'success');
+}
+
+async function deleteVendor(idx) {
+    if (!confirm('Remove ' + vendorList[idx].name + ' from vendor list?')) return;
+    vendorList.splice(idx, 1);
+    renderVendorList();
+    await saveToolsVendors();
+    showStatus('Vendor removed.', 'success');
+}
+
+// =============================================
+// SERVICE / ITEMS MANAGEMENT
+// =============================================
+function renderServiceList() {
+    var container = document.getElementById('servicesList');
+    if (!container) return;
+    container.innerHTML = '';
+    var countEl = document.getElementById('serviceCount');
+    if (countEl) countEl.textContent = '(' + serviceList.length + ')';
+    var search = (document.getElementById('toolsServiceSearch') || {}).value || '';
+    search = search.toLowerCase().trim();
+
+    var filtered = serviceList;
+    if (search) {
+        filtered = serviceList.filter(function(s) {
+            return s.name && s.name.toLowerCase().indexOf(search) !== -1;
+        });
+    }
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;">' + (serviceList.length === 0 ? 'No items/services yet. Add one to get started!' : 'No matches found.') + '</div>';
+        return;
+    }
+    filtered.forEach(function(s) {
+        var realIdx = serviceList.indexOf(s);
+        var div = document.createElement('div');
+        div.className = 'tools-list-item';
+        div.innerHTML =
+            '<div class="item-info"><div class="item-name">' + s.name + '</div></div>' +
+            '<div class="item-actions">' +
+            '<button class="btn-icon btn-icon-edit" onclick="openServiceForm(' + realIdx + ')" title="Edit">&#9998;</button>' +
+            '<button class="btn-icon btn-icon-delete" onclick="deleteService(' + realIdx + ')" title="Delete">&#128465;</button>' +
+            '</div>';
+        container.appendChild(div);
+    });
+}
+
+function openServiceForm(idx) {
+    document.getElementById('serviceFormOverlay').classList.add('active');
+    if (typeof idx === 'number' && idx >= 0) {
+        document.getElementById('serviceFormTitle').textContent = 'Edit Item / Service';
+        document.getElementById('serviceFormIndex').value = idx;
+        document.getElementById('serviceFormName').value = serviceList[idx].name || '';
+    } else {
+        document.getElementById('serviceFormTitle').textContent = 'Add Item / Service';
+        document.getElementById('serviceFormIndex').value = -1;
+        document.getElementById('serviceFormName').value = '';
+    }
+    document.getElementById('serviceFormName').focus();
+}
+
+function closeServiceForm() {
+    document.getElementById('serviceFormOverlay').classList.remove('active');
+}
+
+async function saveServiceForm() {
+    var idx = parseInt(document.getElementById('serviceFormIndex').value);
+    var name = document.getElementById('serviceFormName').value.trim();
+    if (!name) { alert('Please enter an item/service name.'); return; }
+
+    if (idx >= 0) {
+        serviceList[idx].name = name;
+    } else {
+        var exists = serviceList.some(function(s) { return s.name.toLowerCase() === name.toLowerCase(); });
+        if (exists) { alert('Item "' + name + '" already exists.'); return; }
+        serviceList.push({ name: name });
+    }
+    serviceList.sort(function(a, b) { return a.name.localeCompare(b.name); });
+    renderServiceList();
+    closeServiceForm();
+    await saveToolsServices();
+    showStatus('Item/service saved!', 'success');
+}
+
+async function deleteService(idx) {
+    if (!confirm('Remove ' + serviceList[idx].name + ' from items/services list?')) return;
+    serviceList.splice(idx, 1);
+    renderServiceList();
+    await saveToolsServices();
+    showStatus('Item/service removed.', 'success');
+}
+
+// =============================================
+// VENDOR AUTOCOMPLETE (Hauled From fields)
+// =============================================
+function showVendorSuggestions(rowIdx, query) {
+    var list = document.getElementById('vendorAC_' + rowIdx);
+    if (!list) return;
+    list.innerHTML = '';
+    if (!query || query.length < 1) { list.classList.remove('active'); return; }
+
+    var q = query.toLowerCase();
+    var matches = vendorList.filter(function(v) {
+        return v.name.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+
+    if (matches.length === 0) { list.classList.remove('active'); return; }
+
+    matches.forEach(function(v) {
+        var div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.innerHTML = '<div class="ac-name">' + v.name + '</div>';
+        div.onclick = function() {
+            document.getElementById('hauledFrom_' + rowIdx).value = v.name;
+            list.classList.remove('active');
+        };
+        list.appendChild(div);
+    });
+    list.classList.add('active');
+}
+
+function promptSaveVendor(input) {
+    var name = (input.value || '').trim();
+    if (!name || name.length < 2) return;
+    var exists = vendorList.some(function(v) { return v.name.toLowerCase() === name.toLowerCase(); });
+    if (!exists) {
+        if (confirm('Add "' + name + '" to vendor list?')) {
+            vendorList.push({ name: name });
+            vendorList.sort(function(a, b) { return a.name.localeCompare(b.name); });
+            saveToolsVendors(); // fire and forget
+            showStatus('Vendor "' + name + '" added!', 'success');
+        }
+    }
+}
+
+// =============================================
+// SERVICE AUTOCOMPLETE (Item/Service fields)
+// =============================================
+function showServiceSuggestions(rowIdx, query) {
+    var list = document.getElementById('serviceAC_' + rowIdx);
+    if (!list) return;
+    list.innerHTML = '';
+    if (!query || query.length < 1) { list.classList.remove('active'); return; }
+
+    var q = query.toLowerCase();
+    var matches = serviceList.filter(function(s) {
+        return s.name.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+
+    if (matches.length === 0) { list.classList.remove('active'); return; }
+
+    matches.forEach(function(s) {
+        var div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.innerHTML = '<div class="ac-name">' + s.name + '</div>';
+        div.onclick = function() {
+            document.getElementById('itemService_' + rowIdx).value = s.name;
+            list.classList.remove('active');
+        };
+        list.appendChild(div);
+    });
+    list.classList.add('active');
+}
+
+function promptSaveService(input) {
+    var name = (input.value || '').trim();
+    if (!name || name.length < 2) return;
+    var exists = serviceList.some(function(s) { return s.name.toLowerCase() === name.toLowerCase(); });
+    if (!exists) {
+        if (confirm('Add "' + name + '" to items/services list?')) {
+            serviceList.push({ name: name });
+            serviceList.sort(function(a, b) { return a.name.localeCompare(b.name); });
+            saveToolsServices(); // fire and forget
+            showStatus('Item "' + name + '" added!', 'success');
+        }
+    }
+}
+
+// =============================================
+// FORM VALIDATION
+// =============================================
+function validateQuoteForm() {
+    // Clear previous validation highlights
+    var highlighted = document.querySelectorAll('.validation-error');
+    highlighted.forEach(function(el) { el.classList.remove('validation-error'); });
+
+    var errors = [];
+
+    // Check customer name
+    var customerName = document.getElementById('customerName');
+    if (!customerName.value.trim()) {
+        errors.push('Customer Name is required.');
+        customerName.classList.add('validation-error');
+    }
+
+    // Check job name
+    var jobName = document.getElementById('jobName');
+    if (!jobName.value.trim()) {
+        errors.push('Job Name is required.');
+        jobName.classList.add('validation-error');
+    }
+
+    // Check at least one line item has a price (material or haul, not both empty)
+    var hasLineItem = false;
+    for (var i = 0; i < 16; i++) {
+        var mat = document.getElementById('material_' + i);
+        var haul = document.getElementById('haul_' + i);
+        var matVal = (mat.value || '').replace(/[^0-9.\-]/g, '');
+        var haulVal = (haul.value || '').replace(/[^0-9.\-]/g, '');
+        if (matVal || haulVal) {
+            hasLineItem = true;
+            break;
+        }
+    }
+    if (!hasLineItem) {
+        errors.push('At least one line item must have a Material or Hauling price.');
+    }
+
+    if (errors.length > 0) {
+        showStatus(errors.join(' '), 'error');
+        return false;
+    }
+    return true;
+}
+
+// =============================================
+// CUSTOMER QUOTE HISTORY
+// =============================================
+function updateCustomerHistoryLink(customerName) {
+    var linkDiv = document.getElementById('customerHistoryLink');
+    var linkText = document.getElementById('customerHistoryText');
+    if (!linkDiv || !linkText) return;
+
+    if (!customerName || !customerName.trim()) {
+        linkDiv.style.display = 'none';
+        return;
+    }
+
+    var name = customerName.trim().toLowerCase();
+    var count = 0;
+    for (var i = 0; i < quoteIndex.length; i++) {
+        if (quoteIndex[i].customerName && quoteIndex[i].customerName.toLowerCase() === name) {
+            count++;
+        }
+    }
+
+    if (count > 0) {
+        linkText.textContent = 'View ' + count + ' past quote' + (count !== 1 ? 's' : '');
+        linkDiv.style.display = 'block';
+    } else {
+        linkDiv.style.display = 'none';
+    }
+}
+
+function showCustomerHistory() {
+    var customerName = (document.getElementById('customerName').value || '').trim();
+    if (!customerName) return;
+
+    var name = customerName.toLowerCase();
+    var matches = quoteIndex.filter(function(q) {
+        return q.customerName && q.customerName.toLowerCase() === name;
+    });
+
+    // Sort by date descending
+    matches.sort(function(a, b) {
+        return (b.date || '').localeCompare(a.date || '');
+    });
+
+    var modal = document.getElementById('customerHistoryModal');
+    var title = document.getElementById('customerHistoryTitle');
+    var list = document.getElementById('customerHistoryList');
+
+    title.textContent = '📋 ' + customerName + ' — ' + matches.length + ' Quote' + (matches.length !== 1 ? 's' : '');
+    list.innerHTML = '';
+
+    if (matches.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:20px;color:#888;">No quotes found for this customer.</div>';
+    } else {
+        matches.forEach(function(q) {
+            var statusBadge = '';
+            var st = q.status || 'Draft';
+            if (st === 'Sent') {
+                statusBadge = '<span style="display:inline-block;padding:1px 8px;border-radius:50px;font-size:10px;font-weight:700;background:#d4edda;color:#155724;margin-left:8px;">Sent</span>';
+            } else {
+                statusBadge = '<span style="display:inline-block;padding:1px 8px;border-radius:50px;font-size:10px;font-weight:700;background:#fff3cd;color:#856404;margin-left:8px;">Draft</span>';
+            }
+            var div = document.createElement('div');
+            div.style.cssText = 'padding:10px 14px;border-bottom:1px solid #eee;cursor:pointer;transition:background 0.15s;';
+            div.onmouseenter = function() { this.style.background = '#f5f5ff'; };
+            div.onmouseleave = function() { this.style.background = ''; };
+            div.innerHTML =
+                '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                '<div>' +
+                '<span style="font-weight:700;color:#333;font-size:14px;">#' + (q.quoteNumber || 'N/A') + '</span>' +
+                statusBadge +
+                '</div>' +
+                '<span style="font-size:12px;color:#888;">' + (q.date || '') + '</span>' +
+                '</div>' +
+                '<div style="font-size:13px;color:#555;margin-top:3px;">' + (q.jobName || 'No job name') + '</div>';
+            div.onclick = function() {
+                closeCustomerHistory();
+                closeSearchModal();
+                loadQuoteFromIndex(q);
+            };
+            list.appendChild(div);
+        });
+    }
+
+    modal.classList.add('active');
+}
+
+function closeCustomerHistory() {
+    var modal = document.getElementById('customerHistoryModal');
+    if (modal) modal.classList.remove('active');
+}
+
+// =============================================
+// DUPLICATE QUOTE DETECTION
+// =============================================
+function checkDuplicateQuote() {
+    var customerName = (document.getElementById('customerName').value || '').trim().toLowerCase();
+    var jobName = (document.getElementById('jobName').value || '').trim().toLowerCase();
+    var currentQuoteNum = (document.getElementById('quoteNumber').value || '').trim();
+
+    if (!customerName || !jobName) return true; // No duplicate check if fields empty
+
+    for (var i = 0; i < quoteIndex.length; i++) {
+        var q = quoteIndex[i];
+        var qCust = (q.customerName || '').toLowerCase();
+        var qJob = (q.jobName || '').toLowerCase();
+        var qNum = (q.quoteNumber || '').toString();
+
+        if (qCust === customerName && qJob === jobName && qNum !== currentQuoteNum) {
+            return confirm('A quote already exists for "' + q.customerName + '" / "' + q.jobName + '" (Quote #' + qNum + '). Save anyway?');
+        }
+    }
+    return true; // No duplicate found
+}
+
 // Parse a single CSV line handling quoted fields
 function parseCSVLine(line) {
     var result = [];
@@ -3467,6 +4095,7 @@ function showCustomerSuggestions(query) {
             document.getElementById('customerAddr2').value = c.addr2 || '';
             document.getElementById('customerEmail').value = c.email || '';
             list.classList.remove('active');
+            updateCustomerHistoryLink(c.name);
         };
         list.appendChild(div);
     });
@@ -3478,6 +4107,13 @@ document.addEventListener('click', function(e) {
     if (!e.target.closest('.autocomplete-wrapper')) {
         var list = document.getElementById('customerAutocomplete');
         if (list) list.classList.remove('active');
+        // Also close vendor and service autocompletes
+        for (var i = 0; i < 16; i++) {
+            var vac = document.getElementById('vendorAC_' + i);
+            if (vac) vac.classList.remove('active');
+            var sac = document.getElementById('serviceAC_' + i);
+            if (sac) sac.classList.remove('active');
+        }
     }
 });
 
@@ -3486,6 +4122,9 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         closeRepForm();
         closeCustomerForm();
+        closeVendorForm();
+        closeServiceForm();
+        closeCustomerHistory();
     }
 });
 
