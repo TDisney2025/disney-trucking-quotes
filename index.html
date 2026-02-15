@@ -519,12 +519,18 @@
             .page-wrapper { padding: 4px; }
             .quote-page { width: 100%; min-height: auto; padding: 10px; box-shadow: none; }
 
-            /* Line items table: horizontal scroll */
+            /* Line items table: fit on screen without scrolling */
             .table-scroll-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -10px; padding: 0 10px; }
-            .line-table { min-width: 600px; }
-            .line-table th { font-size: 9px; padding: 4px 2px; }
-            .line-table td input, .line-table td select { font-size: 12px !important; padding: 4px !important; }
-            .line-table td { height: 32px; }
+            .line-table { min-width: 0; width: 100%; table-layout: fixed; }
+            .line-table th { font-size: 8px; padding: 3px 1px; letter-spacing: 0; word-break: break-word; }
+            .line-table .col-hauled { width: 22%; }
+            .line-table .col-item { width: 22%; }
+            .line-table .col-material { width: 14%; }
+            .line-table .col-haul { width: 14%; }
+            .line-table .col-unit { width: 12%; }
+            .line-table .col-total { width: 16%; }
+            .line-table td input, .line-table td select { font-size: 11px !important; padding: 2px 2px !important; }
+            .line-table td { height: 28px; }
 
             /* Dashboard responsive */
             .dashboard-view { padding: 12px; }
@@ -564,6 +570,9 @@
         @media (max-width: 480px) {
             .dash-stats { grid-template-columns: 1fr; }
             .toolbar-right .btn-tool { padding: 6px 8px; }
+            .line-table th { font-size: 7px; padding: 2px 1px; }
+            .line-table td input, .line-table td select { font-size: 10px !important; padding: 1px 1px !important; }
+            .line-table td { height: 26px; }
         }
 
     </style>
