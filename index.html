@@ -1352,19 +1352,15 @@ async function saveQuote() {
         const quoteNumber = document.getElementById('quoteNumber').value;
         const baseFileName = customerName + '  _ ' + jobName + ' _ ' + formatDateForFile(new Date());
 
-        // Generate and upload PDF
+        // Generate and upload PDF only
         showStatus('Generating PDF...', 'info');
         const pdfBlob = await generatePDF();
         await uploadToOneDrive(baseFileName + '.pdf', pdfBlob, 'application/pdf');
 
-        // Generate and upload Excel
-        showStatus('Generating Excel...', 'info');
-        const excelBlob = await generateExcel();
-        await uploadToOneDrive(baseFileName + '.xlsx', excelBlob, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
         // Save quote data to search index
         showStatus('Updating quote index...', 'info');
-        await loadQuoteIndex();
+        // If index not loaded yet, load it; otherwise use in-memory copy
+        if (quoteIndex.length === 0) await loadQuoteIndex();
         addQuoteToIndex(getQuoteDataFromForm());
         await saveQuoteIndex();
 
@@ -2188,11 +2184,12 @@ async function handleNewQuote() {
     // No confirmation — just create new quote immediately
 
     try {
-        const currentNum = parseInt(document.getElementById('quoteNumber').value) || 10578;
-        const newNum = currentNum + 1;
+        // ALWAYS read from OneDrive tracker — never from the form field
+        await getToken();
+        await loadQuoteNumber();
+        const newNum = parseInt(document.getElementById('quoteNumber').value) || 10578;
 
         // Save the NEXT number (one after the new current)
-        await getToken();
         await saveQuoteNumber(newNum + 1);
 
         // Set new quote number
@@ -2270,6 +2267,27 @@ async function loadQuoteIndex() {
 async function saveQuoteIndex() {
     try {
         const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
+
+        // SAFETY CHECK: fetch current cloud count before overwriting
+        try {
+            var checkResp = await fetch(url.replace(':/content', ''), {
+                headers: { "Authorization": `Bearer ${accessToken}` }
+            });
+            if (checkResp.ok) {
+                var meta = await checkResp.json();
+                var cloudSize = meta.size || 0;
+                var localSize = JSON.stringify(quoteIndex).length;
+                // If cloud file is significantly larger, don't overwrite (data loss protection)
+                if (cloudSize > localSize * 1.5 && quoteIndex.length < 100) {
+                    console.error("SAFETY: Cloud index (" + cloudSize + " bytes) much larger than local (" + localSize + " bytes, " + quoteIndex.length + " entries). Aborting save to prevent data loss.");
+                    showStatus("Warning: Quote index save skipped — data mismatch detected. Please refresh.", "error");
+                    return;
+                }
+            }
+        } catch (checkErr) {
+            console.log("Could not verify cloud index size:", checkErr);
+        }
+
         await fetch(url, {
             method: "PUT",
             headers: {
@@ -2485,9 +2503,10 @@ async function handleCopyQuote() {
     // No confirmation — just copy quote immediately
 
     try {
+        // ALWAYS read from OneDrive tracker — never from the form field
         await getToken();
-        const currentNum = parseInt(document.getElementById('quoteNumber').value) || 10578;
-        const newNum = currentNum + 1;
+        await loadQuoteNumber();
+        const newNum = parseInt(document.getElementById('quoteNumber').value) || 10578;
 
         // Save the NEXT number
         await saveQuoteNumber(newNum + 1);
