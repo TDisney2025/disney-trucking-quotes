@@ -2050,11 +2050,32 @@ async function handleEmailQuote() {
 
         // Build email message
         var emailSubject = 'Quote Number ' + quoteNumber + ' for ' + jobName + ' from T. Disney Trucking';
-        var emailBody = '<p>Good morning,</p>' +
+
+        // Dynamic greeting based on time of day
+        var hour = new Date().getHours();
+        var greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+        // Build signature from sales rep data
+        var senderRep = salesReps.find(function(r) { return r.name === quotedBy; });
+        var sigName = senderRep ? senderRep.name : quotedBy;
+        var sigEmail = senderRep ? senderRep.email : '';
+        var sigCompany = senderRep ? senderRep.company : 'T. Disney Trucking & Grading, Inc.';
+        var sigAddress = senderRep ? senderRep.address : '6324 US HWY 301 S, Riverview, FL 33578';
+        var sigPhone = senderRep ? senderRep.phone : '(844) 258-7825';
+
+        var signature = '<br>' +
+            '<p style="margin:0;font-weight:bold;color:#333;">' + sigName + '</p>' +
+            '<p style="margin:0;color:#555;">' + sigCompany + '</p>' +
+            '<p style="margin:0;color:#555;">' + sigAddress + '</p>' +
+            '<p style="margin:0;color:#555;">Phone: ' + sigPhone + '</p>' +
+            (sigEmail ? '<p style="margin:0;color:#555;">Email: <a href="mailto:' + sigEmail + '">' + sigEmail + '</a></p>' : '');
+
+        var emailBody = '<p>' + greeting + ',</p>' +
             '<p>Please find the attached quote for <strong>' + jobName + '</strong>. ' +
             'Let me know if you have any questions or need to add any additional items. ' +
             'We look forward to working on this project together!</p>' +
-            '<p>Thank you!</p>';
+            '<p>Thank you!</p>' +
+            signature;
 
         var message = {
             message: {
@@ -2113,7 +2134,7 @@ async function handleEmailQuote() {
         } catch (e2) { console.log('PDF fallback failed:', e2); }
 
         var subjectEnc = encodeURIComponent('Quote Number ' + quoteNumber + ' for ' + jobName + ' from T. Disney Trucking');
-        var bodyEnc = encodeURIComponent('Good morning,\r\n\r\nPlease find the attached quote for ' + jobName + '. Let me know if you have any questions or need to add any additional items. We look forward to working on this project together!\r\n\r\nThank you!');
+        var bodyEnc = encodeURIComponent(greeting + ',\r\n\r\nPlease find the attached quote for ' + jobName + '. Let me know if you have any questions or need to add any additional items. We look forward to working on this project together!\r\n\r\nThank you!\r\n\r\n' + sigName + '\r\n' + sigCompany + '\r\n' + sigAddress + '\r\nPhone: ' + sigPhone + '\r\n' + (sigEmail ? 'Email: ' + sigEmail : ''));
         window.location.href = 'mailto:' + encodeURIComponent(customerEmail) + '?subject=' + subjectEnc + '&body=' + bodyEnc;
     } finally {
         btnEmail.disabled = false;
