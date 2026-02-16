@@ -2657,6 +2657,7 @@ function filterSearchResults() {
         row.onclick = function() {
             loadQuoteDataToForm(q);
             closeSearchModal();
+            showView('quote');
             showStatus('Loaded quote #' + q.quoteNumber, 'success');
         };
         container.appendChild(row);
