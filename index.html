@@ -12,6 +12,7 @@
     <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 
     <!-- PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <!-- Excel Generation (ExcelJS - full styling support) -->
@@ -1518,299 +1519,217 @@ async function uploadToOneDrive(fileName, blob, contentType) {
 // Page: 612pt x 792pt (8.5" x 11" letter)
 // =============================================
 async function generatePDF() {
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF('p', 'pt', 'letter');
-
-    var W = 612, H = 792;
-    var pageW = W, pageH = H;
-    var ML = 36, MR = 36;
-    var CW = W - ML - MR;
-    var RE = W - MR;
-
     function val(id) { return document.getElementById(id).value || ''; }
     function txt(id) { return document.getElementById(id).textContent || ''; }
+    function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     function pdfDate(ds) {
         if (!ds) return '';
         var p = ds.split('/');
         return p.length === 3 ? parseInt(p[0]) + '/' + parseInt(p[1]) + '/' + p[2] : ds;
     }
 
+    // ── Read form data ──
     var rep = salesReps.find(function(r) { return r.name === val('quotedBy'); });
     var compName = (rep && rep.company) || 'T. Disney Trucking & Grading, Inc.';
     var compAddr = (rep && rep.address) || '6324 US HWY 301 S, Riverview, FL 33578';
     var compPhone = (rep && rep.phone) || '(844) 258-7825';
-    var ap = compAddr.split(',');
-    var addr1 = (ap[0] || '').trim();
-    var addr2 = ap.length > 1 ? ap.slice(1).join(',').trim() : '';
 
-    // ── TOP BARS ──
-    var barSplit = Math.round(pageW * 0.65);
-    pdf.setFillColor(192, 0, 0);
-    pdf.rect(0, 0, barSplit, 12, 'F');
-    pdf.setFillColor(51, 51, 51);
-    pdf.rect(barSplit, 0, W - barSplit, 12, 'F');
+    var customerName = val('customerName');
+    var customerAddr1 = val('customerAddr1');
+    var customerAddr2 = val('customerAddr2');
+    var jobName = val('jobName');
+    var jobAddr1 = val('jobAddr1');
+    var jobAddr2 = val('jobAddr2');
+    var quoteNumber = val('quoteNumber');
+    var dateField = pdfDate(txt('dateField'));
+    var validThrough = pdfDate(txt('validThrough'));
+    var quotedBy = val('quotedBy');
+    var terms = val('terms');
+    var fEmail = document.getElementById('footerEmail').textContent || '';
 
-    // ── LOGO ──
+    // ── Logo as base64 ──
+    var logoSrc = '';
     try {
         var logoImg = document.querySelector('.header-logo img');
         if (logoImg && logoImg.src) {
-            pdf.addImage(logoImg.src, 'JPEG', ML, 28, 140, 72);
+            logoSrc = logoImg.src;
         }
     } catch (e) {}
 
-    // ── COMPANY INFO (centered in white space between logo and right edge) ──
-    var cx = 420;
-    pdf.setFont('times', 'normal');
-    pdf.setFontSize(14);
-    pdf.setTextColor(0, 0, 0);
-    pdf.text(compName, cx, 50, { align: 'center' });
-    pdf.setFontSize(11);
-    pdf.text(addr1, cx, 66, { align: 'center' });
-    pdf.text(addr2, cx, 80, { align: 'center' });
-    pdf.text('Phone: ' + compPhone, cx, 94, { align: 'center' });
-
-    // ── QUOTE # (right-aligned, below company info) ──
-    var quoteNum = val('quoteNumber');
-    if (quoteNum) {
-        pdf.setFont('times', 'normal');
-        pdf.setFontSize(10);
-        pdf.text('Quote #', RE - 48, 110, { align: 'right' });
-        pdf.text(quoteNum, RE, 110, { align: 'right' });
-    }
-
-    // ── THIN LINE below Quote # ──
-    pdf.setDrawColor(0, 0, 0);
-    pdf.setLineWidth(0.3);
-    pdf.line(ML, 118, RE, 118);
-
-    // ── CUSTOMER NAME / JOB INFO / QUOTE ──
-    var secY = 138;
-    pdf.setFont('times', 'bold');
-    pdf.setFontSize(12);
-    pdf.setTextColor(0, 0, 0);
-    pdf.text('Customer Name:', ML + 10, secY);
-    pdf.text('Job Information:', 240, secY);
-
-    // QUOTE title — right side. Top of letters should align with "Customer Name:" baseline
-    // 42pt Times = ~30pt from top to baseline, so baseline = secY + 30
-    pdf.setFont('times', 'bold');
-    pdf.setFontSize(42);
-    pdf.text('QUOTE', RE, secY + 30, { align: 'right' });
-
-    // Customer value (name + address lines)
-    pdf.setFont('times', 'normal');
-    pdf.setFontSize(11);
-    var custLines = [];
-    var cn = val('customerName');
-    var ca1 = val('customerAddr1');
-    var ca2 = val('customerAddr2');
-    if (cn) custLines.push(cn);
-    if (ca1) custLines.push(ca1);
-    if (ca2) custLines.push(ca2);
-    if (custLines.length === 0) custLines.push('');
-    for (var ci = 0; ci < custLines.length; ci++) {
-        pdf.text(custLines[ci], ML + 10, secY + 18 + (ci * 14));
-    }
-
-    // Job values (multi-line support)
-    var jobLines = [];
-    var jn = val('jobName'), ja1 = val('jobAddr1'), ja2 = val('jobAddr2');
-    if (jn) jobLines.push(jn);
-    if (ja1) jobLines.push(ja1);
-    if (ja2) jobLines.push(ja2);
-    if (jobLines.length === 0) jobLines.push('');
-    for (var ji = 0; ji < jobLines.length; ji++) {
-        pdf.text(jobLines[ji], 240, secY + 18 + (ji * 14));
-    }
-
-    // Detail block (right, below QUOTE baseline at secY+30)
-    var dy = secY + 46;
-    var labelX = RE - 86;
-    pdf.setFontSize(11);
-    var details = [
-        ['Date:', pdfDate(txt('dateField'))],
-        ['Valid Through:', pdfDate(txt('validThrough'))],
-        ['Quoted By:', val('quotedBy')],
-        ['Terms:', val('terms')]
-    ];
-    for (var di = 0; di < details.length; di++) {
-        pdf.setFont('times', 'bold');
-        pdf.text(details[di][0], labelX, dy, { align: 'right' });
-        pdf.setFont('times', 'normal');
-        pdf.text(details[di][1], RE, dy, { align: 'right' });
-        dy += 15;
-    }
-
-    // ── TABLE ──
-    var tableTop = dy + 16;
-
-    var tData = [];
+    // ── Line items (always 16 rows) ──
+    var rows = [];
     for (var i = 0; i < 16; i++) {
-        tData.push([
-            val('hauledFrom_' + i),
-            val('itemService_' + i),
-            val('material_' + i),
-            val('haul_' + i),
-            val('unit_' + i),
-            txt('total_' + i)
-        ]);
+        rows.push({
+            hauledFrom: val('hauledFrom_' + i),
+            itemService: val('itemService_' + i),
+            material: val('material_' + i),
+            haul: val('haul_' + i),
+            unit: val('unit_' + i),
+            total: txt('total_' + i)
+        });
     }
 
-    var hdrH = 22;
-    var rowH = 13;
+    // ── Build table rows HTML ──
+    var tableRowsHtml = '';
+    for (var i = 0; i < 16; i++) {
+        var r = rows[i];
+        tableRowsHtml += '<tr>' +
+            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.hauledFrom) + '</td>' +
+            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.itemService) + '</td>' +
+            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.material) + '</td>' +
+            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.haul) + '</td>' +
+            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.unit) + '</td>' +
+            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#1e293b;">' + esc(r.total) + '</td>' +
+            '</tr>';
+    }
 
-    // Column widths matching original proportions exactly
-    var colW = [CW*0.22, CW*0.22, CW*0.13, CW*0.11, CW*0.11, CW*0.21];
+    // ── Customer card content ──
+    var custHtml = '';
+    if (customerName) custHtml += '<strong style="color:#1e293b;font-weight:600;">' + esc(customerName) + '</strong>';
+    if (customerAddr1) custHtml += '<br>' + esc(customerAddr1);
+    if (customerAddr2) custHtml += '<br>' + esc(customerAddr2);
+    if (!custHtml) custHtml = '&nbsp;';
 
-    pdf.autoTable({
-        startY: tableTop,
-        margin: { left: ML, right: MR },
-        head: [['HAULED FROM', 'ITEM / SERVICE', 'MATERIAL', 'HAUL', 'UNIT', 'TOTAL']],
-        body: tData,
-        theme: 'plain',
-        tableWidth: CW,
-        styles: {
-            font: 'times',
-            fontSize: 10,
-            cellPadding: { top: 2, right: 4, bottom: 1, left: 4 },
-            textColor: [0, 0, 0],
-            minCellHeight: rowH
-        },
-        headStyles: {
-            fillColor: [192, 0, 0],
-            textColor: [255, 255, 255],
-            fontStyle: 'bold',
-            halign: 'center',
-            valign: 'middle',
-            fontSize: 10,
-            minCellHeight: hdrH
-        },
-        columnStyles: {
-            0: { cellWidth: colW[0], halign: 'center' },
-            1: { cellWidth: colW[1], halign: 'center' },
-            2: { cellWidth: colW[2], halign: 'center' },
-            3: { cellWidth: colW[3], halign: 'center' },
-            4: { cellWidth: colW[4], halign: 'center' },
-            5: { cellWidth: colW[5], halign: 'center' }
-        },
-        didDrawPage: function(data) {
-            var headY = data.table.head[0].cells[0].y;
-            var headH = data.table.head[0].cells[0].height;
-            var botY = data.cursor.y;
-            var bodyY = headY + headH;
+    // ── Job card content ──
+    var jobHtml = '';
+    if (jobName) jobHtml += '<strong style="color:#1e293b;font-weight:600;">' + esc(jobName) + '</strong>';
+    if (jobAddr1) jobHtml += '<br>' + esc(jobAddr1);
+    if (jobAddr2) jobHtml += '<br>' + esc(jobAddr2);
+    if (!jobHtml) jobHtml = '&nbsp;';
 
-            // Collect column widths
-            var cw = [];
-            for (var c = 0; c < data.table.columns.length; c++) {
-                cw.push(data.table.columns[c].width);
-            }
+    // ── Build full HTML template (Design5 Red Modern Pro) ──
+    var html = '' +
+    '<div style="width:8.5in;min-height:11in;background:#fff;position:relative;overflow:hidden;font-family:Segoe UI,Calibri,Arial,Helvetica,sans-serif;color:#475569;box-sizing:border-box;">' +
 
-            // Red left border on header
-            pdf.setDrawColor(192, 0, 0);
-            pdf.setLineWidth(0.5);
-            pdf.line(ML, headY, ML, headY + headH);
+      '<!-- Top accent bar -->' +
+      '<div style="height:5px;background:linear-gradient(90deg,#c00000 0%,#c00000 65%,#333 65%,#333 100%);"></div>' +
 
-            // Black outline around header
-            pdf.setDrawColor(0, 0, 0);
-            pdf.setLineWidth(0.5);
-            pdf.rect(ML, headY, CW, headH, 'S');
+      '<!-- Header -->' +
+      '<div style="padding:24px 48px 20px;display:flex;align-items:center;justify-content:space-between;">' +
+        '<div style="flex:0 0 auto;">' +
+          (logoSrc ? '<img src="' + logoSrc + '" style="height:72px;object-fit:contain;" />' : '') +
+        '</div>' +
+        '<div style="flex:1;text-align:center;padding:0 20px;">' +
+          '<div style="font-size:17px;font-weight:700;color:#1e293b;letter-spacing:-0.3px;">' + esc(compName) + '</div>' +
+          '<div style="font-size:10px;color:#94a3b8;line-height:1.6;margin-top:3px;">' + esc(compAddr) + '<br>' + esc(compPhone) + '</div>' +
+        '</div>' +
+        '<div style="flex:0 0 auto;text-align:center;">' +
+          '<div style="display:inline-block;background:linear-gradient(135deg,#c00000,#a00000);color:#fff;padding:6px 22px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Quote</div>' +
+          '<div style="font-size:28px;font-weight:700;color:#1e293b;margin-top:4px;letter-spacing:-1px;">#' + esc(quoteNumber) + '</div>' +
+        '</div>' +
+      '</div>' +
 
-            // White column dividers in header
-            pdf.setDrawColor(255, 255, 255);
-            pdf.setLineWidth(0.75);
-            var x = ML;
-            for (var c = 0; c < cw.length - 1; c++) {
-                x += cw[c];
-                pdf.line(x, headY + 3, x, headY + headH - 3);
-            }
+      '<!-- Divider -->' +
+      '<div style="margin:0 48px;height:1px;background:#e2e8f0;"></div>' +
 
-            // Red left border on body
-            pdf.setDrawColor(192, 0, 0);
-            pdf.setLineWidth(0.5);
-            pdf.line(ML, bodyY, ML, botY);
+      '<!-- Cards row -->' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 48px 0;">' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;">' +
+          '<div style="font-size:8px;font-weight:700;color:#c00000;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Customer</div>' +
+          '<div style="font-size:12px;color:#475569;line-height:1.6;">' + custHtml + '</div>' +
+        '</div>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;">' +
+          '<div style="font-size:8px;font-weight:700;color:#c00000;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Job Location</div>' +
+          '<div style="font-size:12px;color:#475569;line-height:1.6;">' + jobHtml + '</div>' +
+        '</div>' +
+      '</div>' +
 
-            // Black outline around body
-            pdf.setDrawColor(0, 0, 0);
-            pdf.setLineWidth(0.5);
-            pdf.rect(ML, bodyY, CW, botY - bodyY, 'S');
+      '<!-- Meta row -->' +
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 48px 0;">' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;text-align:center;">' +
+          '<div style="font-size:8px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;">Date</div>' +
+          '<div style="font-size:13px;font-weight:600;color:#1e293b;margin-top:2px;">' + esc(dateField) + '</div>' +
+        '</div>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;text-align:center;">' +
+          '<div style="font-size:8px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;">Valid Through</div>' +
+          '<div style="font-size:13px;font-weight:600;color:#1e293b;margin-top:2px;">' + esc(validThrough) + '</div>' +
+        '</div>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;text-align:center;">' +
+          '<div style="font-size:8px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;">Quoted By</div>' +
+          '<div style="font-size:13px;font-weight:600;color:#1e293b;margin-top:2px;">' + esc(quotedBy) + '</div>' +
+        '</div>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;text-align:center;">' +
+          '<div style="font-size:8px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;">Terms</div>' +
+          '<div style="font-size:13px;font-weight:600;color:#1e293b;margin-top:2px;">' + esc(terms) + '</div>' +
+        '</div>' +
+      '</div>' +
 
-            // Vertical column dividers in body (black, thin)
-            pdf.setDrawColor(0, 0, 0);
-            pdf.setLineWidth(0.3);
-            x = ML;
-            for (var c = 0; c < cw.length - 1; c++) {
-                x += cw[c];
-                pdf.line(x, bodyY, x, botY);
-            }
+      '<!-- Table -->' +
+      '<div style="margin:18px 48px 0;">' +
+        '<table style="width:100%;border-collapse:separate;border-spacing:0;">' +
+          '<thead>' +
+            '<tr>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:left;border-radius:8px 0 0 0;">Hauled From</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:left;">Item / Service</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:center;">Material</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:center;">Haul</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:center;">Unit</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:right;border-radius:0 8px 0 0;">Total</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' +
+            tableRowsHtml +
+          '</tbody>' +
+        '</table>' +
+      '</div>' +
+      '<div style="height:4px;background:#1e293b;border-radius:0 0 8px 8px;margin:0 48px;"></div>' +
 
-            // NO horizontal row lines — vertical dividers only
-        }
-    });
+      '<!-- Signature area -->' +
+      '<div style="margin:36px 48px 0;display:flex;gap:48px;">' +
+        '<div>' +
+          '<div style="width:260px;border-bottom:1.5px solid #cbd5e1;height:28px;"></div>' +
+          '<div style="font-size:8px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px;">Signature of Acceptance</div>' +
+        '</div>' +
+        '<div>' +
+          '<div style="width:140px;border-bottom:1.5px solid #cbd5e1;height:28px;"></div>' +
+          '<div style="font-size:8px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px;">Date</div>' +
+        '</div>' +
+      '</div>' +
 
-    var tEnd = pdf.lastAutoTable.finalY;
+      '<!-- Terms -->' +
+      '<div style="margin:26px 48px 0;padding:14px 18px;background:#f8fafc;border-radius:8px;border-left:3px solid #c00000;">' +
+        '<div style="font-size:8px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Terms &amp; Conditions</div>' +
+        '<div style="font-size:8px;color:#94a3b8;line-height:1.6;">This quotation is for goods named above. Payment on completed jobs is due by terms listed above to avoid finance charges. Terms are net date of delivery. Payments are not contingent upon prime contractor being paid. Expired quotes are not valid and must be requoted prior to work commencing. Credit application must be on file in addition to the signed quote for work to commence.</div>' +
+      '</div>' +
 
-    // ================================================================
-    //  6. SIGNATURE BLOCK — fixed position near bottom of page
-    //     Matches EHC original: signature at ~y=620, plenty of white
-    //     space between table and signature
-    // ================================================================
-    // Fixed position near bottom; if table is very long, push down
-    var sigY = Math.max(H - 170, tEnd + 40);
-    pdf.setDrawColor(0, 0, 0);
-    pdf.setLineWidth(0.75);
-    pdf.line(ML + 20, sigY, 350, sigY);       // sig line
-    pdf.line(390, sigY, 500, sigY);            // date line
+      '<!-- Footer -->' +
+      '<div style="position:absolute;bottom:0;left:0;right:0;">' +
+        '<div style="display:flex;justify-content:center;gap:32px;padding:12px 48px;font-size:9px;color:#94a3b8;font-weight:500;">' +
+          '<span>Fax: (800) 530-2126</span>' +
+          '<span>' + esc(fEmail) + '</span>' +
+          '<span>www.disneytrucking.com</span>' +
+        '</div>' +
+        '<div style="height:5px;background:linear-gradient(90deg,#c00000 0%,#c00000 65%,#333 65%,#333 100%);"></div>' +
+      '</div>' +
 
-    pdf.setFont('times', 'italic');
-    pdf.setFontSize(11);
-    pdf.setTextColor(0, 0, 0);
-    pdf.text('Signature of Acceptance', (ML + 20 + 350) / 2, sigY + 14, { align: 'center' });
-    pdf.text('Date', (390 + 500) / 2, sigY + 14, { align: 'center' });
+    '</div>';
 
-    // ================================================================
-    //  7. TERMS & CONDITIONS
-    // ================================================================
-    var tcY = sigY + 36;
-    pdf.setFont('times', 'bold');
-    pdf.setFontSize(10);
-    pdf.setTextColor(0, 0, 0);
-    pdf.text('Terms & Conditions:', W / 2, tcY, { align: 'center' });
+    // ── Create hidden container ──
+    var container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.innerHTML = html;
+    document.body.appendChild(container);
 
-    tcY += 14;
-    pdf.setFont('times', 'normal');
-    pdf.setFontSize(7.5);
-    pdf.setTextColor(40, 40, 40);
-    var tcText = 'This quotation is for goods named above. Payment on completed jobs is due by terms listed above to avoid finance charges. Terms are net date of delivery. Payments are not continguint upon prime contractor being paid. Expired quotes are not valid and must be requoted prior to work commencing. Credit application must be on file in addition to the signed quote for work to commence.';
-    var tcLines = pdf.splitTextToSize(tcText, CW - 16);
-    pdf.text(tcLines, W / 2, tcY, { align: 'center' });
+    var element = container.firstChild;
 
-    // ================================================================
-    //  8. FOOTER
-    // ================================================================
-    var fY = H - 42;
-    pdf.setDrawColor(0, 0, 0);
-    pdf.setLineWidth(0.5);
-    pdf.line(ML, fY, RE, fY);
+    // ── html2pdf options ──
+    var opt = {
+        margin: 0,
+        filename: 'quote.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, letterRendering: true, logging: false },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+    };
 
-    fY += 14;
-    var fEmail = document.getElementById('footerEmail').textContent;
-    pdf.setFont('times', 'bold');
-    pdf.setFontSize(10);
-    pdf.setTextColor(0, 0, 0);
-    // Evenly spaced visually — adjusted for text length differences
-    pdf.text('Fax: (800) 530-2126', ML + CW * 0.15, fY, { align: 'center' });
-    pdf.text('Email: ' + fEmail, ML + CW * 0.50, fY, { align: 'center' });
-    pdf.text('Website: www.disneytrucking.com', ML + CW * 0.87, fY, { align: 'center' });
+    // ── Generate PDF blob ──
+    var blob = await html2pdf().set(opt).from(element).outputPdf('blob');
 
-    // ================================================================
-    //  9. BOTTOM ACCENT BARS
-    // ================================================================
-    pdf.setFillColor(192, 0, 0);
-    pdf.rect(0, pageH - 10, barSplit, 10, 'F');
-    pdf.setFillColor(51, 51, 51);
-    pdf.rect(barSplit, pageH - 10, W - barSplit, 10, 'F');
+    // ── Clean up ──
+    document.body.removeChild(container);
 
-    return pdf.output('blob');
+    return blob;
 }
 
 // =============================================
