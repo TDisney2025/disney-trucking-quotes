@@ -242,7 +242,7 @@
         .autocomplete-list { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 2px solid #C00000; border-top: none; border-radius: 0 0 6px 6px; max-height: 200px; overflow-y: auto; z-index: 500; display: none; box-shadow: 0 8px 20px rgba(0,0,0,0.15); }
         .autocomplete-list.active { display: block; }
         .autocomplete-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0; transition: background 0.1s; }
-        .autocomplete-item:hover { background: #fff0f0; }
+        .autocomplete-item:hover, .autocomplete-item.ac-active { background: #fff0f0; }
         .autocomplete-item .ac-name { font-weight: 700; font-size: 13px; color: #333; }
         .autocomplete-item .ac-addr { font-size: 11px; color: #888; }
 
@@ -1172,6 +1172,7 @@ function initializeApp() {
         rebuildSalesRepEmails();
         initializeDates();
         generateLineItems();
+        attachAutoCompleteKeyHandlers();
         updateFooterEmail();
         return;
     }
@@ -1179,6 +1180,7 @@ function initializeApp() {
     rebuildSalesRepEmails();
     initializeDates();
     generateLineItems();
+    attachAutoCompleteKeyHandlers();
     updateFooterEmail();
 
     // Log URL state for debugging
@@ -3776,6 +3778,7 @@ async function deleteService(idx) {
 // VENDOR AUTOCOMPLETE (Hauled From fields)
 // =============================================
 function showVendorSuggestions(rowIdx, query) {
+    acActiveIndex = -1;
     var list = document.getElementById('vendorAC_' + rowIdx);
     if (!list) return;
     list.innerHTML = '';
@@ -3802,8 +3805,9 @@ function showVendorSuggestions(rowIdx, query) {
 }
 
 function promptSaveVendor(input) {
+    if (acJustSelected) { acJustSelected = false; return; }
     var name = (input.value || '').trim();
-    if (!name || name.length < 2) return;
+    if (!name || name.length < 3) return;
     var exists = vendorList.some(function(v) { return v.name.toLowerCase() === name.toLowerCase(); });
     if (!exists) {
         if (confirm('Add "' + name + '" to vendor list?')) {
@@ -3819,6 +3823,7 @@ function promptSaveVendor(input) {
 // SERVICE AUTOCOMPLETE (Item/Service fields)
 // =============================================
 function showServiceSuggestions(rowIdx, query) {
+    acActiveIndex = -1;
     var list = document.getElementById('serviceAC_' + rowIdx);
     if (!list) return;
     list.innerHTML = '';
@@ -3845,8 +3850,9 @@ function showServiceSuggestions(rowIdx, query) {
 }
 
 function promptSaveService(input) {
+    if (acJustSelected) { acJustSelected = false; return; }
     var name = (input.value || '').trim();
-    if (!name || name.length < 2) return;
+    if (!name || name.length < 3) return;
     var exists = serviceList.some(function(s) { return s.name.toLowerCase() === name.toLowerCase(); });
     if (!exists) {
         if (confirm('Add "' + name + '" to items/services list?')) {
@@ -4075,6 +4081,7 @@ function autoAddCustomer(name, addr1, addr2, email) {
 // CUSTOMER AUTOCOMPLETE
 // =============================================
 function showCustomerSuggestions(query) {
+    acActiveIndex = -1;
     var list = document.getElementById('customerAutocomplete');
     list.innerHTML = '';
     if (!query || query.length < 2) { list.classList.remove('active'); return; }
@@ -4103,6 +4110,166 @@ function showCustomerSuggestions(query) {
     });
     list.classList.add('active');
 }
+
+// =============================================
+// KEYBOARD NAVIGATION
+// =============================================
+var acActiveIndex = -1;
+var acJustSelected = false;
+
+// Shared autocomplete keyboard handler
+function acKeyHandler(e, listEl, inputEl, selectCallback) {
+    if (!listEl || !listEl.classList.contains('active')) return false;
+    var items = listEl.querySelectorAll('.autocomplete-item');
+    if (items.length === 0) return false;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        acActiveIndex = (acActiveIndex + 1) % items.length;
+        updateAcHighlight(items);
+        return true;
+    }
+    if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        acActiveIndex = (acActiveIndex - 1 + items.length) % items.length;
+        updateAcHighlight(items);
+        return true;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        // If nothing highlighted, select the first item
+        var idx = acActiveIndex >= 0 ? acActiveIndex : 0;
+        if (idx < items.length) {
+            acJustSelected = true;
+            items[idx].click(); // triggers the existing onclick which sets value & closes list
+        }
+        // For Tab, also advance to next field
+        if (e.key === 'Tab') {
+            setTimeout(function() { focusNextField(inputEl); }, 10);
+        }
+        acActiveIndex = -1;
+        return true;
+    }
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        listEl.classList.remove('active');
+        acActiveIndex = -1;
+        return true;
+    }
+    return false;
+}
+
+function updateAcHighlight(items) {
+    for (var i = 0; i < items.length; i++) {
+        if (i === acActiveIndex) {
+            items[i].classList.add('ac-active');
+            // Scroll into view if needed
+            items[i].scrollIntoView({ block: 'nearest' });
+        } else {
+            items[i].classList.remove('ac-active');
+        }
+    }
+}
+
+// Find next focusable field in the quote form
+function focusNextField(currentEl) {
+    var form = document.getElementById('printArea');
+    if (!form) return;
+    var focusable = form.querySelectorAll('input:not([type="hidden"]):not([readonly]):not([disabled]), select:not([disabled])');
+    for (var i = 0; i < focusable.length; i++) {
+        if (focusable[i] === currentEl && i + 1 < focusable.length) {
+            focusable[i + 1].focus();
+            return;
+        }
+    }
+}
+
+// Attach keyboard handlers to vendor/service autocomplete inputs
+function attachAutoCompleteKeyHandlers() {
+    for (var i = 0; i < 16; i++) {
+        (function(idx) {
+            var hauled = document.getElementById('hauledFrom_' + idx);
+            if (hauled) {
+                hauled.addEventListener('keydown', function(e) {
+                    var list = document.getElementById('vendorAC_' + idx);
+                    acKeyHandler(e, list, hauled, null);
+                });
+            }
+            var item = document.getElementById('itemService_' + idx);
+            if (item) {
+                item.addEventListener('keydown', function(e) {
+                    var list = document.getElementById('serviceAC_' + idx);
+                    acKeyHandler(e, list, item, null);
+                });
+            }
+        })(i);
+    }
+
+    // Customer name autocomplete keyboard handler
+    var custInput = document.getElementById('customerName');
+    if (custInput) {
+        custInput.addEventListener('keydown', function(e) {
+            var list = document.getElementById('customerAutocomplete');
+            acKeyHandler(e, list, custInput, null);
+        });
+    }
+}
+
+// Line items grid arrow key navigation
+var LINE_ITEM_COLS = ['hauledFrom', 'itemService', 'material', 'haul', 'unit'];
+
+function getGridPosition(el) {
+    var id = el.id || '';
+    for (var col = 0; col < LINE_ITEM_COLS.length; col++) {
+        var prefix = LINE_ITEM_COLS[col] + '_';
+        if (id.indexOf(prefix) === 0) {
+            var row = parseInt(id.substring(prefix.length), 10);
+            if (!isNaN(row)) return { row: row, col: col };
+        }
+    }
+    return null;
+}
+
+function getGridElement(row, col) {
+    if (row < 0 || row > 15 || col < 0 || col >= LINE_ITEM_COLS.length) return null;
+    return document.getElementById(LINE_ITEM_COLS[col] + '_' + row);
+}
+
+// Enter key: advance to next field (when no autocomplete dropdown open)
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter') return;
+    var target = e.target;
+    if (!target.closest('#printArea')) return;
+    if (target.tagName !== 'INPUT' && target.tagName !== 'SELECT') return;
+
+    // If autocomplete dropdown is open, the input-level handler takes care of it
+    var acList = target.parentElement ? target.parentElement.querySelector('.autocomplete-list.active') : null;
+    if (acList) return;
+
+    e.preventDefault();
+    target.blur();
+    setTimeout(function() { focusNextField(target); }, 10);
+});
+
+// ArrowUp/ArrowDown: grid navigation in line items (when no autocomplete open)
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    var target = e.target;
+    var pos = getGridPosition(target);
+    if (!pos) return;
+
+    // Don't intercept if an autocomplete dropdown is active
+    var acList = target.parentElement ? target.parentElement.querySelector('.autocomplete-list.active') : null;
+    if (acList) return;
+
+    e.preventDefault();
+    var newRow = pos.row + (e.key === 'ArrowDown' ? 1 : -1);
+    var nextEl = getGridElement(newRow, pos.col);
+    if (nextEl) {
+        target.blur();
+        nextEl.focus();
+    }
+});
 
 // Close autocomplete when clicking outside
 document.addEventListener('click', function(e) {
