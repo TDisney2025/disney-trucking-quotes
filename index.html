@@ -3808,6 +3808,12 @@ function promptSaveVendor(input) {
     if (acJustSelected) { acJustSelected = false; return; }
     var name = (input.value || '').trim();
     if (!name || name.length < 3) return;
+    // Don't prompt if dropdown is still showing (user tabbed away quickly)
+    var parentTd = input.parentElement;
+    if (parentTd) {
+        var acList = parentTd.querySelector('.autocomplete-list.active');
+        if (acList) { acList.classList.remove('active'); return; }
+    }
     var exists = vendorList.some(function(v) { return v.name.toLowerCase() === name.toLowerCase(); });
     if (!exists) {
         if (confirm('Add "' + name + '" to vendor list?')) {
@@ -3853,6 +3859,12 @@ function promptSaveService(input) {
     if (acJustSelected) { acJustSelected = false; return; }
     var name = (input.value || '').trim();
     if (!name || name.length < 3) return;
+    // Don't prompt if dropdown is still showing (user tabbed away quickly)
+    var parentTd = input.parentElement;
+    if (parentTd) {
+        var acList = parentTd.querySelector('.autocomplete-list.active');
+        if (acList) { acList.classList.remove('active'); return; }
+    }
     var exists = serviceList.some(function(s) { return s.name.toLowerCase() === name.toLowerCase(); });
     if (!exists) {
         if (confirm('Add "' + name + '" to items/services list?')) {
