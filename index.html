@@ -1490,7 +1490,12 @@ async function saveQuote() {
         showStatus('Saved! ' + baseFileName + '.pdf uploaded to OneDrive.', 'success');
     } catch (error) {
         console.error('Save error:', error);
-        showStatus('Error: ' + error.message, 'error');
+        var errMsg = 'Save failed: ' + error.message;
+        showStatus(errMsg, 'error');
+        // On mobile, status bar can be easy to miss — show alert so user knows it failed
+        if (window.innerWidth <= 768) {
+            alert(errMsg);
+        }
     } finally {
         saveBtn.disabled = false;
         saveBtn.innerHTML = '&#128190; Save';
@@ -1715,11 +1720,13 @@ async function generatePDF() {
     var element = container.firstChild;
 
     // ── html2pdf options ──
+    // Use lower scale on mobile to prevent memory crashes with html2canvas
+    var isMobile = window.innerWidth <= 768;
     var opt = {
         margin: 0,
         filename: 'quote.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true, logging: false },
+        image: { type: 'jpeg', quality: isMobile ? 0.92 : 0.98 },
+        html2canvas: { scale: isMobile ? 1.5 : 2, useCORS: true, letterRendering: true, logging: false },
         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
     };
 
@@ -3837,7 +3844,12 @@ function validateQuoteForm() {
     }
 
     if (errors.length > 0) {
-        showStatus(errors.join(' '), 'error');
+        var errMsg = errors.join(' ');
+        showStatus(errMsg, 'error');
+        // On mobile, status bar can be easy to miss — show alert so user sees validation errors
+        if (window.innerWidth <= 768) {
+            alert(errMsg);
+        }
         return false;
     }
     return true;
