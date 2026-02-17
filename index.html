@@ -8,15 +8,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>T. Disney Trucking - Quote Template</title>
 
-    <!-- Microsoft Authentication Library -->
-    <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+    <!-- Microsoft Authentication Library (local with CDN fallback) -->
+    <script src="lib/msal-browser.min.js"></script>
+    <script>if (typeof msal === 'undefined') document.write('<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"><\/script>');</script>
 
-    <!-- PDF Generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-    <!-- Excel Generation (ExcelJS - full styling support) -->
-    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <!-- PDF Generation (local with CDN fallback) -->
+    <script src="lib/html2pdf.bundle.min.js"></script>
+    <script>if (typeof html2pdf === 'undefined') document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>');</script>
+    <script src="lib/jspdf.umd.min.js"></script>
+    <script>if (typeof jspdf === 'undefined' && typeof jsPDF === 'undefined') document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"><\/script>');</script>
+    <script src="lib/jspdf.plugin.autotable.min.js"></script>
+    <script>if (typeof jspdf === 'undefined' || !jspdf.jsPDF.prototype.autoTable) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"><\/script>');</script>
+
+    <!-- Excel Generation (local with CDN fallback) -->
+    <script src="lib/exceljs.min.js"></script>
+    <script>if (typeof ExcelJS === 'undefined') document.write('<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"><\/script>');</script>
 
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -651,6 +657,7 @@
 
     <!-- Status -->
     <div id="statusBar" class="status-bar no-print"></div>
+    <div id="syncIndicator" class="no-print" style="position:fixed;bottom:8px;right:12px;font-size:11px;font-weight:600;padding:4px 10px;border-radius:50px;z-index:900;transition:all 0.3s;"></div>
 
     <!-- Dashboard View -->
     <div class="dashboard-view no-print" id="dashboardView">
@@ -998,6 +1005,9 @@
                 <div class="tools-card-body" style="padding:16px;">
                     <button class="btn-add-item" onclick="syncQuoteIndex()" style="background:linear-gradient(135deg,#ff6b35,#f7931e);">&#128259; Refresh Quote Index</button>
                     <p style="font-size:12px;color:#888;margin-top:8px;">Re-download the quote index from OneDrive (use if quote count looks wrong)</p>
+                    <hr style="margin:12px 0;border:none;border-top:1px solid #eee;">
+                    <button class="btn-add-item" onclick="exportAllData()" style="background:linear-gradient(135deg,#28a745,#20c997);">&#128230; Export All Data (Backup)</button>
+                    <p style="font-size:12px;color:#888;margin-top:8px;">Download a backup of all quotes, customers, vendors, and services as a JSON file</p>
                 </div>
             </div>
         </div>
@@ -1153,6 +1163,149 @@ function rebuildSalesRepEmails() {
 
 let msalInstance = null;
 let accessToken = null;
+var isOnline = navigator.onLine;
+var autoSaveTimer = null;
+var quoteIndexETag = null; // ETag for optimistic concurrency on quote-index.json
+
+// =============================================
+// UTILITY: Retry with exponential backoff
+// =============================================
+async function fetchWithRetry(url, options, maxRetries) {
+    maxRetries = maxRetries || 3;
+    for (var attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            var resp = await fetch(url, options);
+            if (resp.ok || resp.status === 204 || resp.status === 412) return resp;
+            // Retry on server errors (5xx) and rate limits (429)
+            if ((resp.status >= 500 || resp.status === 429) && attempt < maxRetries - 1) {
+                var wait = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+                console.log('Retry ' + (attempt + 1) + '/' + maxRetries + ' after ' + Math.round(wait) + 'ms (status ' + resp.status + ')');
+                await new Promise(function(r) { setTimeout(r, wait); });
+                continue;
+            }
+            return resp; // Return non-retryable error response
+        } catch (networkErr) {
+            if (attempt < maxRetries - 1) {
+                var wait = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+                console.log('Retry ' + (attempt + 1) + '/' + maxRetries + ' after network error: ' + networkErr.message);
+                await new Promise(function(r) { setTimeout(r, wait); });
+                continue;
+            }
+            throw networkErr; // Final attempt failed
+        }
+    }
+}
+
+// =============================================
+// UTILITY: Filename sanitization
+// =============================================
+function sanitizeFileName(name) {
+    // Remove characters unsafe for filenames and OneDrive paths
+    return (name || '').replace(/[<>:"/\\|?*#%]/g, '').replace(/\.\./g, '').replace(/^\s+|\s+$/g, '').substring(0, 100);
+}
+
+// =============================================
+// UTILITY: Offline detection
+// =============================================
+window.addEventListener('online', function() {
+    isOnline = true;
+    updateSyncIndicator('online');
+    showStatus('Back online.', 'success');
+});
+window.addEventListener('offline', function() {
+    isOnline = false;
+    updateSyncIndicator('offline');
+    showStatus('You are offline. Changes will not be saved until connection is restored.', 'error');
+});
+
+// =============================================
+// UTILITY: Sync status indicator
+// =============================================
+function updateSyncIndicator(state) {
+    var el = document.getElementById('syncIndicator');
+    if (!el) return;
+    if (state === 'saving') {
+        el.innerHTML = '&#9203; Saving...';
+        el.style.color = '#004085';
+        el.style.background = '#cce5ff';
+    } else if (state === 'saved') {
+        el.innerHTML = '&#10003; All changes saved';
+        el.style.color = '#155724';
+        el.style.background = '#d4edda';
+    } else if (state === 'error') {
+        el.innerHTML = '&#9888; Save error';
+        el.style.color = '#856404';
+        el.style.background = '#fff3cd';
+    } else if (state === 'offline') {
+        el.innerHTML = '&#9888; Offline';
+        el.style.color = '#721c24';
+        el.style.background = '#f8d7da';
+    } else if (state === 'online') {
+        el.innerHTML = '&#10003; Online';
+        el.style.color = '#155724';
+        el.style.background = '#d4edda';
+        setTimeout(function() {
+            var el2 = document.getElementById('syncIndicator');
+            if (el2 && el2.innerHTML.indexOf('Online') >= 0) {
+                el2.innerHTML = '';
+                el2.style.background = 'transparent';
+            }
+        }, 3000);
+    } else {
+        el.innerHTML = '';
+        el.style.background = 'transparent';
+    }
+}
+
+// =============================================
+// UTILITY: Auto-save draft to localStorage
+// =============================================
+function autoSaveDraft() {
+    try {
+        var quoteNum = document.getElementById('quoteNumber').value;
+        if (!quoteNum) return; // No quote loaded
+        var data = getQuoteDataFromForm();
+        localStorage.setItem('quote_draft_' + quoteNum, JSON.stringify(data));
+        localStorage.setItem('quote_draft_latest', quoteNum);
+    } catch (e) {
+        console.log('Auto-save draft error:', e);
+    }
+}
+
+function startAutoSave() {
+    if (autoSaveTimer) clearInterval(autoSaveTimer);
+    autoSaveTimer = setInterval(autoSaveDraft, 30000); // Every 30 seconds
+}
+
+function clearDraft(quoteNum) {
+    try {
+        localStorage.removeItem('quote_draft_' + quoteNum);
+        var latest = localStorage.getItem('quote_draft_latest');
+        if (latest === quoteNum) localStorage.removeItem('quote_draft_latest');
+    } catch (e) {}
+}
+
+function checkForDraftRecovery() {
+    try {
+        var latestNum = localStorage.getItem('quote_draft_latest');
+        if (!latestNum) return;
+        var draftJson = localStorage.getItem('quote_draft_' + latestNum);
+        if (!draftJson) return;
+        var draft = JSON.parse(draftJson);
+        // Only offer recovery if draft has meaningful data
+        if (draft.customerName && draft.customerName.trim()) {
+            if (confirm('Unsaved draft found for Quote #' + latestNum + ' (' + draft.customerName + ' / ' + (draft.jobName || 'No job') + ').\n\nRestore this draft?')) {
+                loadQuoteDataToForm(draft);
+                showView('quote');
+                showStatus('Draft restored for Quote #' + latestNum, 'success');
+            } else {
+                clearDraft(latestNum);
+            }
+        }
+    } catch (e) {
+        console.log('Draft recovery check error:', e);
+    }
+}
 
 // =============================================
 // INITIALIZATION
@@ -1241,25 +1394,45 @@ function signIn() {
     });
 }
 
+var _tokenPromise = null; // Prevents concurrent token refresh race conditions
 async function getToken() {
+    // If a token refresh is already in progress, wait for it
+    if (_tokenPromise) return _tokenPromise;
+
     var account = msalInstance.getActiveAccount();
     if (!account) throw new Error("No active account");
 
+    _tokenPromise = (async function() {
+        try {
+            var response = await msalInstance.acquireTokenSilent({
+                scopes: graphScopes,
+                account: account
+            });
+            accessToken = response.accessToken;
+            return response.accessToken;
+        } catch (silentError) {
+            console.log("Silent token failed, trying popup:", silentError.message);
+            // Use popup instead of redirect to preserve current page state (unsaved quote data)
+            try {
+                var popupResponse = await msalInstance.acquireTokenPopup({
+                    scopes: graphScopes
+                });
+                accessToken = popupResponse.accessToken;
+                return popupResponse.accessToken;
+            } catch (popupError) {
+                console.log("Popup token failed, falling back to redirect:", popupError.message);
+                // Auto-save draft before redirecting so user doesn't lose work
+                autoSaveDraft();
+                msalInstance.acquireTokenRedirect({ scopes: graphScopes });
+                throw new Error("Redirecting for token renewal — your draft has been saved.");
+            }
+        }
+    })();
+
     try {
-        var response = await msalInstance.acquireTokenSilent({
-            scopes: graphScopes,
-            account: account
-        });
-        accessToken = response.accessToken;
-        return response.accessToken;
-    } catch (silentError) {
-        console.log("Silent token failed, trying redirect:", silentError.message);
-        // Use redirect for token renewal too
-        msalInstance.acquireTokenRedirect({
-            scopes: graphScopes
-        });
-        // Page will redirect, so this won't return
-        throw new Error("Redirecting for token renewal...");
+        return await _tokenPromise;
+    } finally {
+        _tokenPromise = null;
     }
 }
 
@@ -1273,6 +1446,10 @@ function showApp(account) {
     document.getElementById("appSection").style.display = "";
     document.getElementById("userName").textContent = account.name || account.username;
     updateMobileUserName(account.name || account.username);
+    // Start auto-save timer
+    startAutoSave();
+    // Check for unsaved draft from previous session
+    checkForDraftRecovery();
     // Show dashboard by default after login
     showDashboardOnLoad();
 }
@@ -1336,9 +1513,6 @@ async function saveQuoteNumber(nextNumber, etag) {
     if (!response.ok) {
         var errText = await response.text();
         throw new Error("Save tracker failed: " + response.status);
-    }
-    try { /* no-op */ } catch (error) {
-        console.error("Error saving quote number:", error);
     }
 }
 
@@ -1454,6 +1628,14 @@ function calculateTotal(rowIndex) {
 // SAVE TO ONEDRIVE (PDF + Excel)
 // =============================================
 async function saveQuote() {
+    // Check offline first
+    if (!navigator.onLine) {
+        autoSaveDraft();
+        showStatus('You are offline. Draft saved locally — it will be available when you reconnect.', 'error');
+        if (window.innerWidth <= 768) alert('You are offline. Draft saved locally.');
+        return;
+    }
+
     // Validate form before saving
     if (!validateQuoteForm()) return;
     // Check for duplicate quotes
@@ -1463,19 +1645,31 @@ async function saveQuote() {
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
     showStatus('Preparing files...', 'info');
+    updateSyncIndicator('saving');
 
     try {
         await getToken();
 
-        const customerName = document.getElementById('customerName').value || 'Customer';
-        const jobName = document.getElementById('jobName').value || 'Job';
+        const customerName = sanitizeFileName(document.getElementById('customerName').value) || 'Customer';
+        const jobName = sanitizeFileName(document.getElementById('jobName').value) || 'Job';
         const quoteNumber = document.getElementById('quoteNumber').value;
         const baseFileName = customerName + '  _ ' + jobName + ' _ ' + formatDateForFile(new Date());
 
-        // Generate and upload PDF only
+        // Generate and upload PDF with retry
         showStatus('Generating PDF...', 'info');
         const pdfBlob = await generatePDF();
-        await uploadToOneDrive(baseFileName + '.pdf', pdfBlob, 'application/pdf');
+        var uploadResp = await fetchWithRetry(
+            'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/' + encodeURIComponent(baseFileName + '.pdf') + ':/content',
+            {
+                method: 'PUT',
+                headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/pdf' },
+                body: pdfBlob
+            }
+        );
+        if (!uploadResp.ok) {
+            var errText = await uploadResp.text();
+            throw new Error('Upload failed (' + uploadResp.status + '): ' + errText);
+        }
 
         // Save quote data to search index
         showStatus('Updating quote index...', 'info');
@@ -1487,11 +1681,18 @@ async function saveQuote() {
         // Auto-add customer to customer list
         autoAddCustomer(customerName, document.getElementById('customerAddr1').value, document.getElementById('customerAddr2').value, document.getElementById('customerEmail').value);
 
+        // Clear draft after successful save
+        clearDraft(quoteNumber);
+
         showStatus('Saved! ' + baseFileName + '.pdf uploaded to OneDrive.', 'success');
+        updateSyncIndicator('saved');
     } catch (error) {
         console.error('Save error:', error);
         var errMsg = 'Save failed: ' + error.message;
         showStatus(errMsg, 'error');
+        updateSyncIndicator('error');
+        // Auto-save draft locally so data isn't lost
+        autoSaveDraft();
         // On mobile, status bar can be easy to miss — show alert so user knows it failed
         if (window.innerWidth <= 768) {
             alert(errMsg);
@@ -2093,7 +2294,7 @@ async function handleEmailQuote() {
     try {
         // Generate PDF
         var pdfBlob = await generatePDF();
-        var baseName = customerName + '  _ ' + jobName + ' _ ' + formatDateForFile(new Date());
+        var baseName = sanitizeFileName(customerName) + '  _ ' + sanitizeFileName(jobName) + ' _ ' + formatDateForFile(new Date());
 
         // Convert blob to base64
         var base64 = await blobToBase64(pdfBlob);
@@ -2334,6 +2535,16 @@ let quoteIndex = [];
 
 async function loadQuoteIndex() {
     try {
+        // Fetch metadata to get ETag for concurrency control
+        var metaUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json`;
+        try {
+            var metaResp = await fetch(metaUrl, { headers: { "Authorization": `Bearer ${accessToken}` } });
+            if (metaResp.ok) {
+                var meta = await metaResp.json();
+                quoteIndexETag = meta.eTag || meta['@odata.etag'] || null;
+            }
+        } catch (e) { quoteIndexETag = null; }
+
         const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
         const response = await fetch(url, {
             headers: { "Authorization": `Bearer ${accessToken}` }
@@ -2348,39 +2559,79 @@ async function loadQuoteIndex() {
 }
 
 async function saveQuoteIndex() {
-    try {
-        const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
-
-        // SAFETY CHECK: fetch current cloud count before overwriting
+    var maxRetries = 3;
+    for (var attempt = 0; attempt < maxRetries; attempt++) {
         try {
-            var checkResp = await fetch(url.replace(':/content', ''), {
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            });
-            if (checkResp.ok) {
-                var meta = await checkResp.json();
-                var cloudSize = meta.size || 0;
-                var localSize = JSON.stringify(quoteIndex).length;
-                // If cloud file is significantly larger, don't overwrite (data loss protection)
-                if (cloudSize > localSize * 1.5 && quoteIndex.length < 100) {
-                    console.error("SAFETY: Cloud index (" + cloudSize + " bytes) much larger than local (" + localSize + " bytes, " + quoteIndex.length + " entries). Aborting save to prevent data loss.");
-                    showStatus("Warning: Quote index save skipped — data mismatch detected. Please refresh.", "error");
-                    return;
-                }
-            }
-        } catch (checkErr) {
-            console.log("Could not verify cloud index size:", checkErr);
-        }
+            const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
 
-        await fetch(url, {
-            method: "PUT",
-            headers: {
+            // SAFETY CHECK: fetch current cloud count before overwriting
+            try {
+                var checkResp = await fetch(url.replace(':/content', ''), {
+                    headers: { "Authorization": `Bearer ${accessToken}` }
+                });
+                if (checkResp.ok) {
+                    var meta = await checkResp.json();
+                    var cloudSize = meta.size || 0;
+                    var localSize = JSON.stringify(quoteIndex).length;
+                    // Update ETag from metadata check
+                    quoteIndexETag = meta.eTag || meta['@odata.etag'] || quoteIndexETag;
+                    // If cloud file is significantly larger, don't overwrite (data loss protection)
+                    if (cloudSize > localSize * 1.5 && quoteIndex.length < 100) {
+                        console.error("SAFETY: Cloud index (" + cloudSize + " bytes) much larger than local (" + localSize + " bytes, " + quoteIndex.length + " entries). Aborting save to prevent data loss.");
+                        showStatus("Warning: Quote index save skipped — data mismatch detected. Please refresh.", "error");
+                        return;
+                    }
+                }
+            } catch (checkErr) {
+                console.log("Could not verify cloud index size:", checkErr);
+            }
+
+            var headers = {
                 "Authorization": `Bearer ${accessToken}`,
                 "Content-Type": "application/json"
-            },
-            body: JSON.stringify(quoteIndex)
-        });
-    } catch (error) {
-        console.error("Error saving quote index:", error);
+            };
+            if (quoteIndexETag) headers["If-Match"] = quoteIndexETag;
+
+            var resp = await fetchWithRetry(url, {
+                method: "PUT",
+                headers: headers,
+                body: JSON.stringify(quoteIndex)
+            });
+
+            if (resp.status === 412) {
+                // ETag conflict — another user saved at the same time
+                console.log("Quote index conflict (attempt " + (attempt + 1) + "), reloading and merging...");
+                if (attempt < maxRetries - 1) {
+                    // Reload cloud index, merge our new entry, retry
+                    var pendingEntry = quoteIndex[0]; // Our newly added entry is at front
+                    await loadQuoteIndex();
+                    if (pendingEntry && pendingEntry.quoteNumber) {
+                        addQuoteToIndex(pendingEntry); // Re-add our entry to the refreshed index
+                    }
+                    await new Promise(function(r) { setTimeout(r, 500 + Math.random() * 500); });
+                    continue;
+                }
+                showStatus("Warning: Quote index conflict. Please try saving again.", "error");
+                return;
+            }
+
+            if (!resp.ok) {
+                throw new Error("Save index failed: " + resp.status);
+            }
+
+            // Update ETag after successful save
+            try {
+                var savedMeta = await resp.json();
+                quoteIndexETag = savedMeta.eTag || savedMeta['@odata.etag'] || null;
+            } catch (e) { quoteIndexETag = null; }
+
+            return; // Success
+        } catch (error) {
+            console.error("Error saving quote index (attempt " + (attempt + 1) + "):", error);
+            if (attempt >= maxRetries - 1) {
+                showStatus("Error saving quote index: " + error.message, "error");
+            }
+        }
     }
 }
 
@@ -2512,6 +2763,8 @@ async function openSearchModal() {
 
 function closeSearchModal() {
     document.getElementById('searchModal').classList.remove('active');
+    // Clean up pending debounce timer
+    if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
 }
 
 function clearSearchFilters() {
@@ -2654,22 +2907,29 @@ async function handleDeleteQuote() {
         await getToken();
 
         // Search OneDrive folder for files matching this quote
-        var listUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + '/children?$top=200';
-        var resp = await fetch(listUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
-        if (resp.ok) {
+        // Use quote number + customer + job for precise matching, with pagination
+        var deleted = 0;
+        var nextLink = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + '/children?$top=200';
+        while (nextLink) {
+            var resp = await fetchWithRetry(nextLink, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+            if (!resp.ok) break;
             var data = await resp.json();
             var files = data.value || [];
-            var deleted = 0;
             for (var i = 0; i < files.length; i++) {
                 var fname = files[i].name || '';
-                // Match files that contain the customer name and job name pattern
+                // Match files by exact customer + job name pattern
                 // Files are saved as: "Customer  _ Job _ MM-DD-YYYY.pdf/.xlsx"
-                if (fname.indexOf(custName) >= 0 && fname.indexOf(jobName) >= 0 && (fname.endsWith('.pdf') || fname.endsWith('.xlsx'))) {
+                // Use both customer+job match AND check it's a quote file type
+                var safeCust = sanitizeFileName(custName);
+                var safeJob = sanitizeFileName(jobName);
+                if (fname.indexOf(safeCust) >= 0 && fname.indexOf(safeJob) >= 0 && (fname.endsWith('.pdf') || fname.endsWith('.xlsx') || fname.endsWith('.xlsm'))) {
                     var delUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + files[i].id;
-                    var delResp = await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + accessToken } });
+                    var delResp = await fetchWithRetry(delUrl, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + accessToken } });
                     if (delResp.ok || delResp.status === 204) deleted++;
                 }
             }
+            // Follow pagination link if more files exist
+            nextLink = data['@odata.nextLink'] || null;
         }
 
         // Remove from quote index
@@ -3172,48 +3432,68 @@ async function saveToolsReps() {
     try {
         await getToken();
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/sales-reps.json:/content';
-        await fetch(url, {
+        var resp = await fetchWithRetry(url, {
             method: 'PUT',
             headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
             body: JSON.stringify(salesReps)
         });
-    } catch (e) { console.error('Save reps error:', e); }
+        if (!resp.ok) throw new Error('Status ' + resp.status);
+        showStatus('Sales reps saved.', 'success');
+    } catch (e) {
+        console.error('Save reps error:', e);
+        showStatus('Error saving sales reps: ' + e.message, 'error');
+    }
 }
 
 async function saveToolsCustomers() {
     try {
         await getToken();
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/customer-list.json:/content';
-        await fetch(url, {
+        var resp = await fetchWithRetry(url, {
             method: 'PUT',
             headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
             body: JSON.stringify(customerList)
         });
-    } catch (e) { console.error('Save customers error:', e); }
+        if (!resp.ok) throw new Error('Status ' + resp.status);
+        showStatus('Customer list saved.', 'success');
+    } catch (e) {
+        console.error('Save customers error:', e);
+        showStatus('Error saving customer list: ' + e.message, 'error');
+    }
 }
 
 async function saveToolsVendors() {
     try {
         await getToken();
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/vendor-list.json:/content';
-        await fetch(url, {
+        var resp = await fetchWithRetry(url, {
             method: 'PUT',
             headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
             body: JSON.stringify(vendorList)
         });
-    } catch (e) { console.error('Save vendors error:', e); }
+        if (!resp.ok) throw new Error('Status ' + resp.status);
+        showStatus('Vendor list saved.', 'success');
+    } catch (e) {
+        console.error('Save vendors error:', e);
+        showStatus('Error saving vendor list: ' + e.message, 'error');
+    }
 }
 
 async function saveToolsServices() {
     try {
         await getToken();
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/service-list.json:/content';
-        await fetch(url, {
+        var resp = await fetchWithRetry(url, {
             method: 'PUT',
             headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
             body: JSON.stringify(serviceList)
         });
-    } catch (e) { console.error('Save services error:', e); }
+        if (!resp.ok) throw new Error('Status ' + resp.status);
+        showStatus('Services list saved.', 'success');
+    } catch (e) {
+        console.error('Save services error:', e);
+        showStatus('Error saving services list: ' + e.message, 'error');
+    }
 }
 
 // =============================================
@@ -3533,6 +3813,44 @@ async function syncQuoteIndex() {
     } catch (e) {
         console.error('Sync error:', e);
         showStatus('Refresh failed: ' + e.message, 'error');
+    }
+}
+
+async function exportAllData() {
+    showStatus('Preparing data export...', 'info');
+    try {
+        await getToken();
+        await loadQuoteIndex();
+        await loadToolsData();
+
+        var backup = {
+            exportDate: new Date().toISOString(),
+            exportedBy: document.getElementById('userName').textContent || 'Unknown',
+            quoteCount: quoteIndex.length,
+            customerCount: customerList.length,
+            vendorCount: vendorList.length,
+            serviceCount: serviceList.length,
+            quotes: quoteIndex,
+            customers: customerList,
+            vendors: vendorList,
+            services: serviceList,
+            salesReps: salesReps
+        };
+
+        var blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'disney-trucking-backup-' + formatDateForFile(new Date()) + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showStatus('Backup exported! ' + quoteIndex.length + ' quotes, ' + customerList.length + ' customers, ' + vendorList.length + ' vendors, ' + serviceList.length + ' services.', 'success');
+    } catch (e) {
+        console.error('Export error:', e);
+        showStatus('Export failed: ' + e.message, 'error');
     }
 }
 
