@@ -1006,6 +1006,12 @@
                     <button class="btn-add-item" onclick="syncQuoteIndex()" style="background:linear-gradient(135deg,#ff6b35,#f7931e);">&#128259; Refresh Quote Index</button>
                     <p style="font-size:12px;color:#888;margin-top:8px;">Re-download the quote index from OneDrive (use if quote count looks wrong)</p>
                     <hr style="margin:12px 0;border:none;border-top:1px solid #eee;">
+                    <button class="btn-add-item" onclick="rebuildIndexFromFiles()" style="background:linear-gradient(135deg,#e91e63,#c2185b);">&#128295; Rebuild Index from Files</button>
+                    <p style="font-size:12px;color:#888;margin-top:8px;">Rebuild the entire quote index by scanning individual quote files. Use if the index is corrupted or shows wrong count.</p>
+                    <hr style="margin:12px 0;border:none;border-top:1px solid #eee;">
+                    <button class="btn-add-item" onclick="if(confirm('Migrate all quotes to individual files? This takes 5-10 minutes.')) migrateToIndividualFiles()" style="background:linear-gradient(135deg,#9c27b0,#7b1fa2);">&#128640; Migrate to Individual Files</button>
+                    <p style="font-size:12px;color:#888;margin-top:8px;">One-time migration: saves each quote as its own file on OneDrive for conflict-free multi-PC use.</p>
+                    <hr style="margin:12px 0;border:none;border-top:1px solid #eee;">
                     <button class="btn-add-item" onclick="exportAllData()" style="background:linear-gradient(135deg,#28a745,#20c997);">&#128230; Export All Data (Backup)</button>
                     <p style="font-size:12px;color:#888;margin-top:8px;">Download a backup of all quotes, customers, vendors, and services as a JSON file</p>
                 </div>
@@ -1671,12 +1677,12 @@ async function saveQuote() {
             throw new Error('Upload failed (' + uploadResp.status + '): ' + errText);
         }
 
-        // Save quote data to search index
-        showStatus('Updating quote index...', 'info');
-        // Always reload from cloud to get latest data before saving
-        await loadQuoteIndex();
-        addQuoteToIndex(getQuoteDataFromForm());
-        await saveQuoteIndex();
+        // Save quote data — individual file FIRST (source of truth), then cache
+        showStatus('Saving quote data...', 'info');
+        var quoteData = getQuoteDataFromForm();
+        await saveIndividualQuote(quoteData);
+        addQuoteToIndex(quoteData);
+        await updateIndexCache();
 
         // Auto-add customer to customer list
         autoAddCustomer(customerName, document.getElementById('customerAddr1').value, document.getElementById('customerAddr2').value, document.getElementById('customerEmail').value);
@@ -2376,10 +2382,10 @@ async function handleEmailQuote() {
         currentQuoteStatus = 'Sent';
         updateStatusBadge();
         try {
-            // Always reload from cloud to get latest data before saving
-            await loadQuoteIndex();
-            addQuoteToIndex(getQuoteDataFromForm());
-            await saveQuoteIndex();
+            var emailQuoteData = getQuoteDataFromForm();
+            await saveIndividualQuote(emailQuoteData);
+            addQuoteToIndex(emailQuoteData);
+            await updateIndexCache();
         } catch (e) { console.log('Status save after email:', e); }
 
     } catch (error) {
@@ -2536,141 +2542,53 @@ let quoteIndex = [];
 
 async function loadQuoteIndex() {
     try {
-        // Fetch metadata to get ETag for concurrency control
-        var metaUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json`;
-        try {
-            var metaResp = await fetch(metaUrl, { headers: { "Authorization": `Bearer ${accessToken}` } });
-            if (metaResp.ok) {
-                var meta = await metaResp.json();
-                quoteIndexETag = meta.eTag || meta['@odata.etag'] || null;
-            }
-        } catch (e) { quoteIndexETag = null; }
-
         const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
         const response = await fetch(url, {
             headers: { "Authorization": `Bearer ${accessToken}` }
         });
         if (response.ok) {
-            var cloudData = await response.json();
-            // SAFETY: Never replace a large in-memory index with a tiny cloud version
-            if (Array.isArray(cloudData) && cloudData.length > 0) {
-                if (quoteIndex.length > 100 && cloudData.length < quoteIndex.length * 0.5) {
-                    console.warn("LOAD SAFETY: Cloud has " + cloudData.length + " but local has " + quoteIndex.length + ". Keeping local and merging.");
-                    // Merge cloud into local instead of replacing
-                    quoteIndex = mergeQuoteIndices(quoteIndex, cloudData);
-                } else {
-                    quoteIndex = cloudData;
-                }
-            } else if (quoteIndex.length === 0) {
-                // Only accept empty cloud data if we have nothing locally
-                quoteIndex = cloudData || [];
+            var rawData = await response.json();
+            var cloudData;
+            // Handle v2 format: { version: 2, quotes: [...] }
+            if (rawData && rawData.version === 2 && Array.isArray(rawData.quotes)) {
+                cloudData = rawData.quotes;
+            } else if (Array.isArray(rawData)) {
+                // Old format: bare array
+                cloudData = rawData;
             } else {
-                console.warn("LOAD SAFETY: Cloud returned empty/invalid but local has " + quoteIndex.length + " entries. Keeping local.");
+                cloudData = [];
+            }
+
+            if (cloudData.length > 0) {
+                quoteIndex = cloudData;
+                console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache');
+            } else if (quoteIndex.length === 0) {
+                // Cache is empty and we have nothing locally — try rebuilding from individual files
+                console.log('loadQuoteIndex: cache empty, attempting rebuild from individual files...');
+                await rebuildIndexFromFiles();
+            } else {
+                console.log('loadQuoteIndex: cache empty but local has ' + quoteIndex.length + ' entries, keeping local');
+            }
+        } else if (response.status === 404) {
+            // No cache file exists — rebuild from individual files
+            if (quoteIndex.length === 0) {
+                console.log('loadQuoteIndex: no cache file, rebuilding from individual files...');
+                await rebuildIndexFromFiles();
             }
         }
     } catch (error) {
-        console.log("No quote index found, keeping current data");
-        if (quoteIndex.length === 0) quoteIndex = [];
+        console.log("loadQuoteIndex error, keeping current data:", error);
+        if (quoteIndex.length === 0) {
+            // Last resort: try rebuilding from individual files
+            try { await rebuildIndexFromFiles(); } catch (e) { console.log('Rebuild also failed:', e); }
+        }
     }
 }
 
+// saveQuoteIndex is now an alias for updateIndexCache.
+// Individual quote files are the source of truth; the cache is non-critical.
 async function saveQuoteIndex() {
-    var maxRetries = 3;
-    for (var attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-            const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
-
-            // SAFETY: Always fetch cloud data, compare counts, and merge if needed
-            try {
-                var cloudResp = await fetch(url, {
-                    headers: { "Authorization": `Bearer ${accessToken}` }
-                });
-                if (cloudResp.ok) {
-                    var cloudIndex = await cloudResp.json();
-                    var cloudCount = Array.isArray(cloudIndex) ? cloudIndex.length : 0;
-                    var localCount = quoteIndex.length;
-
-                    console.log("Quote index save: cloud has " + cloudCount + " entries, local has " + localCount + " entries.");
-
-                    if (cloudCount > localCount) {
-                        // Cloud has MORE entries than local — merge to prevent data loss
-                        console.warn("MERGE: Cloud has " + cloudCount + " entries vs local " + localCount + ". Merging to prevent data loss.");
-                        quoteIndex = mergeQuoteIndices(quoteIndex, cloudIndex);
-                        console.log("After merge: " + quoteIndex.length + " entries.");
-                        showStatus("Merged " + (quoteIndex.length - localCount) + " missing quotes from cloud.", "info");
-                    }
-                }
-
-                // Update ETag from metadata
-                var metaUrl = url.replace(':/content', '');
-                var metaResp = await fetch(metaUrl, { headers: { "Authorization": `Bearer ${accessToken}` } });
-                if (metaResp.ok) {
-                    var meta = await metaResp.json();
-                    quoteIndexETag = meta.eTag || meta['@odata.etag'] || quoteIndexETag;
-                }
-            } catch (checkErr) {
-                console.log("Could not fetch cloud index for comparison:", checkErr);
-            }
-
-            // HARD SAFETY FLOOR: Never overwrite cloud with fewer than 2000 entries
-            // The index has ~2800+ quotes. If local has fewer than 2000 after merge,
-            // something went wrong — abort to prevent data loss.
-            if (quoteIndex.length < 2000) {
-                console.error("SAFETY ABORT: quoteIndex only has " + quoteIndex.length + " entries. Refusing to save. Expected 2000+.");
-                showStatus("Warning: Quote index save blocked — too few entries (" + quoteIndex.length + "). Data protection active.", "error");
-                return;
-            }
-
-            // Save daily backup before overwriting
-            await backupQuoteIndex();
-
-            // Now save the (possibly merged) index with ETag concurrency
-            var headers = {
-                "Authorization": `Bearer ${accessToken}`,
-                "Content-Type": "application/json"
-            };
-            if (quoteIndexETag) headers["If-Match"] = quoteIndexETag;
-
-            var resp = await fetchWithRetry(url, {
-                method: "PUT",
-                headers: headers,
-                body: JSON.stringify(quoteIndex)
-            });
-
-            if (resp.status === 412) {
-                // ETag conflict — another user saved at the same time
-                console.log("Quote index conflict (attempt " + (attempt + 1) + "), reloading and merging...");
-                if (attempt < maxRetries - 1) {
-                    var pendingEntry = quoteIndex[0]; // Our newly added entry is at front
-                    await loadQuoteIndex();
-                    if (pendingEntry && pendingEntry.quoteNumber) {
-                        addQuoteToIndex(pendingEntry);
-                    }
-                    await new Promise(function(r) { setTimeout(r, 500 + Math.random() * 500); });
-                    continue;
-                }
-                showStatus("Warning: Quote index conflict. Please try saving again.", "error");
-                return;
-            }
-
-            if (!resp.ok) {
-                throw new Error("Save index failed: " + resp.status);
-            }
-
-            // Update ETag after successful save
-            try {
-                var savedMeta = await resp.json();
-                quoteIndexETag = savedMeta.eTag || savedMeta['@odata.etag'] || null;
-            } catch (e) { quoteIndexETag = null; }
-
-            return; // Success
-        } catch (error) {
-            console.error("Error saving quote index (attempt " + (attempt + 1) + "):", error);
-            if (attempt >= maxRetries - 1) {
-                showStatus("Error saving quote index: " + error.message, "error");
-            }
-        }
-    }
+    await updateIndexCache();
 }
 
 function addQuoteToIndex(quoteData) {
@@ -2739,6 +2657,244 @@ async function backupQuoteIndex() {
         }
     } catch (err) {
         console.log('Backup failed (non-critical):', err);
+    }
+}
+
+// =============================================
+// INDIVIDUAL QUOTE FILE STORAGE
+// Each quote is stored as its own file: quotes/{quoteNumber}.json
+// This prevents conflicts when multiple PCs save simultaneously.
+// quote-index.json becomes a rebuildable cache.
+// =============================================
+
+// Get or create the quotes/ subfolder in OneDrive. Returns the folder item ID.
+var quotesFolderId = null;
+async function getOrCreateQuotesFolder() {
+    if (quotesFolderId) return quotesFolderId;
+    try {
+        // Check if quotes/ subfolder already exists
+        var checkUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes';
+        var resp = await fetch(checkUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (resp.ok) {
+            var data = await resp.json();
+            quotesFolderId = data.id;
+            return quotesFolderId;
+        }
+        // Create the folder
+        var createUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + '/children';
+        var createResp = await fetch(createUrl, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'quotes', folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+        });
+        if (createResp.ok || createResp.status === 409) {
+            // 409 = already exists (race condition), re-fetch
+            if (createResp.status === 409) {
+                var recheck = await fetch(checkUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+                if (recheck.ok) { quotesFolderId = (await recheck.json()).id; return quotesFolderId; }
+            } else {
+                quotesFolderId = (await createResp.json()).id;
+                return quotesFolderId;
+            }
+        }
+        throw new Error('Could not create quotes folder: ' + createResp.status);
+    } catch (err) {
+        console.error('getOrCreateQuotesFolder error:', err);
+        throw err;
+    }
+}
+
+// Save a single quote as an individual file: quotes/{quoteNumber}.json
+async function saveIndividualQuote(quoteData) {
+    if (!quoteData || !quoteData.quoteNumber) {
+        console.log('saveIndividualQuote: skipping — no quoteNumber');
+        return;
+    }
+    try {
+        var fileName = quoteData.quoteNumber + '.json';
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + fileName + ':/content';
+        var resp = await fetchWithRetry(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(quoteData)
+        });
+        if (!resp.ok) {
+            console.error('saveIndividualQuote failed for #' + quoteData.quoteNumber + ': ' + resp.status);
+        }
+    } catch (err) {
+        console.error('saveIndividualQuote error:', err);
+    }
+}
+
+// Delete an individual quote file from OneDrive
+async function deleteIndividualQuote(quoteNum) {
+    if (!quoteNum) return;
+    try {
+        var fileName = quoteNum + '.json';
+        // Get item ID first
+        var metaUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + fileName;
+        var metaResp = await fetch(metaUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (metaResp.ok) {
+            var meta = await metaResp.json();
+            var delUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + meta.id;
+            await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + accessToken } });
+            console.log('Deleted individual quote file: ' + fileName);
+        }
+    } catch (err) {
+        console.log('deleteIndividualQuote (non-critical):', err);
+    }
+}
+
+// Update the quote-index.json cache (non-critical — individual files are truth)
+async function updateIndexCache() {
+    try {
+        var cacheData = { version: 2, quotes: quoteIndex };
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index.json:/content';
+        var resp = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(cacheData)
+        });
+        if (resp.ok) {
+            console.log('Index cache updated: ' + quoteIndex.length + ' entries');
+        } else {
+            console.warn('Index cache update failed (non-critical): ' + resp.status);
+        }
+    } catch (err) {
+        console.warn('Index cache update error (non-critical):', err);
+    }
+}
+
+// Rebuild quoteIndex from individual files in quotes/ folder
+// This is the recovery mechanism if cache is corrupted or empty
+async function rebuildIndexFromFiles() {
+    showStatus('Rebuilding quote index from individual files... This may take a minute.', 'info');
+    console.log('rebuildIndexFromFiles: starting...');
+    var allQuotes = [];
+    try {
+        await getToken();
+        // List all files in the quotes/ subfolder with pagination
+        var nextLink = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes:/children?$top=200';
+        var fileList = [];
+        while (nextLink) {
+            var listResp = await fetch(nextLink, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+            if (!listResp.ok) {
+                if (listResp.status === 404) {
+                    console.log('rebuildIndexFromFiles: quotes/ folder not found — no individual files yet');
+                    showStatus('No individual quote files found. Index not changed.', 'info');
+                    return;
+                }
+                throw new Error('List quotes folder failed: ' + listResp.status);
+            }
+            var listData = await listResp.json();
+            var items = listData.value || [];
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].name && items[i].name.endsWith('.json')) {
+                    fileList.push(items[i]);
+                }
+            }
+            nextLink = listData['@odata.nextLink'] || null;
+        }
+        console.log('rebuildIndexFromFiles: found ' + fileList.length + ' quote files');
+        showStatus('Found ' + fileList.length + ' quote files. Downloading...', 'info');
+
+        // Download in batches of 10
+        var batchSize = 10;
+        for (var b = 0; b < fileList.length; b += batchSize) {
+            var batch = fileList.slice(b, b + batchSize);
+            var promises = batch.map(function(item) {
+                var dlUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + item.id + '/content';
+                return fetch(dlUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } })
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .catch(function() { return null; });
+            });
+            var results = await Promise.all(promises);
+            for (var r = 0; r < results.length; r++) {
+                if (results[r]) allQuotes.push(results[r]);
+            }
+            if (b + batchSize < fileList.length) {
+                showStatus('Downloaded ' + Math.min(b + batchSize, fileList.length) + ' of ' + fileList.length + ' quotes...', 'info');
+                await new Promise(function(resolve) { setTimeout(resolve, 1000); });
+            }
+        }
+
+        // Sort by savedDate descending (newest first)
+        allQuotes.sort(function(a, b) {
+            var da = a.savedDate ? new Date(a.savedDate) : new Date(0);
+            var db = b.savedDate ? new Date(b.savedDate) : new Date(0);
+            return db - da;
+        });
+
+        quoteIndex = allQuotes;
+        console.log('rebuildIndexFromFiles: rebuilt with ' + quoteIndex.length + ' entries');
+        showStatus('Index rebuilt! ' + quoteIndex.length + ' quotes recovered from individual files.', 'success');
+
+        // Update the cache file
+        await updateIndexCache();
+    } catch (err) {
+        console.error('rebuildIndexFromFiles error:', err);
+        showStatus('Rebuild error: ' + err.message, 'error');
+    }
+}
+
+// One-time migration: write each quote in quoteIndex as an individual file
+async function migrateToIndividualFiles() {
+    if (quoteIndex.length === 0) {
+        showStatus('No quotes to migrate. Load the index first.', 'error');
+        return;
+    }
+    var total = quoteIndex.length;
+    var migrated = 0;
+    var skipped = 0;
+    var errors = 0;
+    showStatus('Starting migration of ' + total + ' quotes to individual files...', 'info');
+    console.log('migrateToIndividualFiles: starting with ' + total + ' entries');
+
+    try {
+        await getToken();
+        // Ensure quotes/ folder exists
+        await getOrCreateQuotesFolder();
+
+        // Process in batches of 10
+        var batchSize = 10;
+        for (var b = 0; b < total; b += batchSize) {
+            var batch = quoteIndex.slice(b, b + batchSize);
+            var promises = batch.map(function(q) {
+                if (!q.quoteNumber) {
+                    skipped++;
+                    return Promise.resolve();
+                }
+                var fileName = q.quoteNumber + '.json';
+                var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + fileName + ':/content';
+                return fetch(url, {
+                    method: 'PUT',
+                    headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(q)
+                }).then(function(resp) {
+                    if (resp.ok) { migrated++; } else { errors++; console.warn('Migration failed for ' + fileName + ': ' + resp.status); }
+                }).catch(function(err) {
+                    errors++;
+                    console.warn('Migration error:', err);
+                });
+            });
+            await Promise.all(promises);
+            var done = Math.min(b + batchSize, total);
+            showStatus('Migrating: ' + done + ' / ' + total + ' (' + migrated + ' saved, ' + skipped + ' skipped, ' + errors + ' errors)', 'info');
+            console.log('Migration progress: ' + done + '/' + total);
+            // Pause between batches to respect rate limits
+            if (b + batchSize < total) {
+                await new Promise(function(resolve) { setTimeout(resolve, 2000); });
+            }
+        }
+
+        // Update cache with version 2 format
+        await updateIndexCache();
+
+        showStatus('Migration complete! ' + migrated + ' quotes saved as individual files. ' + skipped + ' skipped (no quote number). ' + errors + ' errors.', 'success');
+        console.log('migrateToIndividualFiles: done. Migrated=' + migrated + ' Skipped=' + skipped + ' Errors=' + errors);
+    } catch (err) {
+        console.error('Migration error:', err);
+        showStatus('Migration error: ' + err.message + '. ' + migrated + ' files saved so far.', 'error');
     }
 }
 
@@ -3032,10 +3188,10 @@ async function handleDeleteQuote() {
             nextLink = data['@odata.nextLink'] || null;
         }
 
-        // Remove from quote index
-        await loadQuoteIndex();
+        // Delete individual quote file and update cache
+        await deleteIndividualQuote(quoteNum);
         quoteIndex = quoteIndex.filter(function(q) { return q.quoteNumber !== quoteNum; });
-        await saveQuoteIndex();
+        await updateIndexCache();
 
         showStatus('Quote #' + quoteNum + ' deleted. ' + (deleted || 0) + ' file(s) removed from OneDrive.', 'success');
 
@@ -3456,10 +3612,10 @@ async function dashDeleteQuote(quoteNum) {
             }
         }
 
-        // Remove from quote index — reload from cloud first to get latest
-        await loadQuoteIndex();
+        // Delete individual quote file and update cache
+        await deleteIndividualQuote(quoteNum);
         quoteIndex = quoteIndex.filter(function(q) { return q.quoteNumber !== quoteNum; });
-        await saveQuoteIndex();
+        await updateIndexCache();
 
         showStatus('Quote #' + quoteNum + ' deleted. ' + deleted + ' file(s) removed.', 'success');
 
