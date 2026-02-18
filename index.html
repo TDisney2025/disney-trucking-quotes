@@ -2551,11 +2551,26 @@ async function loadQuoteIndex() {
             headers: { "Authorization": `Bearer ${accessToken}` }
         });
         if (response.ok) {
-            quoteIndex = await response.json();
+            var cloudData = await response.json();
+            // SAFETY: Never replace a large in-memory index with a tiny cloud version
+            if (Array.isArray(cloudData) && cloudData.length > 0) {
+                if (quoteIndex.length > 100 && cloudData.length < quoteIndex.length * 0.5) {
+                    console.warn("LOAD SAFETY: Cloud has " + cloudData.length + " but local has " + quoteIndex.length + ". Keeping local and merging.");
+                    // Merge cloud into local instead of replacing
+                    quoteIndex = mergeQuoteIndices(quoteIndex, cloudData);
+                } else {
+                    quoteIndex = cloudData;
+                }
+            } else if (quoteIndex.length === 0) {
+                // Only accept empty cloud data if we have nothing locally
+                quoteIndex = cloudData || [];
+            } else {
+                console.warn("LOAD SAFETY: Cloud returned empty/invalid but local has " + quoteIndex.length + " entries. Keeping local.");
+            }
         }
     } catch (error) {
-        console.log("No quote index found, starting fresh");
-        quoteIndex = [];
+        console.log("No quote index found, keeping current data");
+        if (quoteIndex.length === 0) quoteIndex = [];
     }
 }
 
@@ -2595,6 +2610,15 @@ async function saveQuoteIndex() {
                 }
             } catch (checkErr) {
                 console.log("Could not fetch cloud index for comparison:", checkErr);
+            }
+
+            // HARD SAFETY FLOOR: Never overwrite cloud with fewer than 2000 entries
+            // The index has ~2800+ quotes. If local has fewer than 2000 after merge,
+            // something went wrong — abort to prevent data loss.
+            if (quoteIndex.length < 2000) {
+                console.error("SAFETY ABORT: quoteIndex only has " + quoteIndex.length + " entries. Refusing to save. Expected 2000+.");
+                showStatus("Warning: Quote index save blocked — too few entries (" + quoteIndex.length + "). Data protection active.", "error");
+                return;
             }
 
             // Save daily backup before overwriting
