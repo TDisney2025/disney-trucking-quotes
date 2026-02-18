@@ -2704,14 +2704,26 @@ async function getOrCreateQuotesFolder() {
     }
 }
 
+// Generate a stable filename for a quote. Uses quoteNumber if available,
+// otherwise creates a hash from customerName + jobName + savedDate.
+function getQuoteFileName(quoteData) {
+    if (quoteData.quoteNumber) return quoteData.quoteNumber + '.json';
+    // For unnumbered quotes, create a stable key from available fields
+    var key = (quoteData.customerName || '') + '|' + (quoteData.jobName || '') + '|' + (quoteData.savedDate || '');
+    // Simple hash to create a short, filesystem-safe name
+    var hash = 0;
+    for (var i = 0; i < key.length; i++) {
+        hash = ((hash << 5) - hash) + key.charCodeAt(i);
+        hash = hash & 0x7fffffff; // keep positive 31-bit
+    }
+    return 'nonum-' + hash.toString(36) + '.json';
+}
+
 // Save a single quote as an individual file: quotes/{quoteNumber}.json
 async function saveIndividualQuote(quoteData) {
-    if (!quoteData || !quoteData.quoteNumber) {
-        console.log('saveIndividualQuote: skipping — no quoteNumber');
-        return;
-    }
+    if (!quoteData) return;
     try {
-        var fileName = quoteData.quoteNumber + '.json';
+        var fileName = getQuoteFileName(quoteData);
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + fileName + ':/content';
         var resp = await fetchWithRetry(url, {
             method: 'PUT',
@@ -2719,7 +2731,7 @@ async function saveIndividualQuote(quoteData) {
             body: JSON.stringify(quoteData)
         });
         if (!resp.ok) {
-            console.error('saveIndividualQuote failed for #' + quoteData.quoteNumber + ': ' + resp.status);
+            console.error('saveIndividualQuote failed for ' + fileName + ': ' + resp.status);
         }
     } catch (err) {
         console.error('saveIndividualQuote error:', err);
@@ -2860,11 +2872,11 @@ async function migrateToIndividualFiles() {
         for (var b = 0; b < total; b += batchSize) {
             var batch = quoteIndex.slice(b, b + batchSize);
             var promises = batch.map(function(q) {
-                if (!q.quoteNumber) {
+                var fileName = getQuoteFileName(q);
+                if (!fileName) {
                     skipped++;
                     return Promise.resolve();
                 }
-                var fileName = q.quoteNumber + '.json';
                 var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + fileName + ':/content';
                 return fetch(url, {
                     method: 'PUT',
