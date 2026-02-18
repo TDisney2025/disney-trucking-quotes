@@ -1011,6 +1011,17 @@
                     <div id="servicesList"></div>
                 </div>
             </div>
+            <!-- Descriptions Card -->
+            <div class="tools-card">
+                <div class="tools-card-header">
+                    <h2>&#128196; Descriptions <span id="descriptionCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
+                    <button class="btn-add-item" onclick="openDescriptionForm()">&#10010; Add Description</button>
+                </div>
+                <div class="tools-card-body">
+                    <input type="text" class="search-input" id="toolsDescriptionSearch" placeholder="Search descriptions..." oninput="renderDescriptionList()" style="margin-bottom:10px;">
+                    <div id="descriptionsList"></div>
+                </div>
+            </div>
             <!-- Utilities Card -->
             <div class="tools-card">
                 <div class="tools-card-header">
@@ -1112,6 +1123,24 @@
         </div>
     </div>
 
+    <!-- Description Form Overlay -->
+    <div class="tools-form-overlay" id="descriptionFormOverlay">
+        <div class="tools-form-box">
+            <div class="tools-form-header">
+                <h3 id="descriptionFormTitle">Add Description</h3>
+                <button class="modal-close" onclick="closeDescriptionForm()">&times;</button>
+            </div>
+            <div class="tools-form-body">
+                <input type="hidden" id="descriptionFormIndex" value="-1">
+                <div class="form-group"><label>Description</label><input type="text" id="descriptionFormName" placeholder="e.g., Per Ton Delivered"></div>
+            </div>
+            <div class="tools-form-actions">
+                <button class="btn-form-cancel" onclick="closeDescriptionForm()">Cancel</button>
+                <button class="btn-form-save" onclick="saveDescriptionForm()">Save Description</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Customer History Modal -->
     <div class="modal-overlay" id="customerHistoryModal">
         <div class="modal-box" style="max-width:600px;">
@@ -1172,6 +1201,7 @@ var salesReps = [
 var customerList = []; // Will be loaded from OneDrive
 var vendorList = [];   // Will be loaded from OneDrive
 var serviceList = [];  // Will be loaded from OneDrive
+var descriptionList = []; // Will be loaded from OneDrive
 var currentQuoteStatus = 'Draft'; // Track status of currently loaded quote
 var currentQuoteType = 'detail'; // 'detail' or 'simple'
 
@@ -1634,8 +1664,8 @@ function generateLineItems() {
         if (currentQuoteType === 'simple') {
             row.innerHTML =
                 '<td class="autocomplete-wrapper"><input type="text" id="simpleItem_' + i + '" onblur="applySmartTitleCase(this); promptSaveService(this)" oninput="showServiceSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="serviceAC_' + i + '"></div></td>' +
-                '<td><input type="text" id="simpleDesc_' + i + '"></td>' +
-                '<td><input type="text" id="simpleUnits_' + i + '"></td>' +
+                '<td class="autocomplete-wrapper"><input type="text" id="simpleDesc_' + i + '" onblur="applySmartTitleCase(this); promptSaveDescription(this)" oninput="showDescriptionSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="descAC_' + i + '"></div></td>' +
+                '<td><select id="simpleUnits_' + i + '"><option value=""></option><option value="Ton">Ton</option><option value="Load">Load</option><option value="Yard">Yard</option><option value="Hourly">Hourly</option></select></td>' +
                 '<td><input type="text" id="simplePrice_' + i + '" class="money-input" inputmode="decimal" onblur="formatMoney(this)"></td>';
         } else {
             row.innerHTML =
@@ -3382,6 +3412,7 @@ function showView(view) {
         renderCustomerList();
         renderVendorList();
         renderServiceList();
+        renderDescriptionList();
     } else {
         quoteView.style.display = 'flex';
     }
@@ -3811,6 +3842,12 @@ async function loadToolsData() {
         if (svcResp.ok) {
             serviceList = await svcResp.json();
         }
+        // Load description list
+        var descUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/description-list.json:/content';
+        var descResp = await fetch(descUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (descResp.ok) {
+            descriptionList = await descResp.json();
+        }
     } catch (e) {
         console.log('Tools data load (first time is normal):', e.message);
     }
@@ -3881,6 +3918,23 @@ async function saveToolsServices() {
     } catch (e) {
         console.error('Save services error:', e);
         showStatus('Error saving services list: ' + e.message, 'error');
+    }
+}
+
+async function saveToolsDescriptions() {
+    try {
+        await getToken();
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/description-list.json:/content';
+        var resp = await fetchWithRetry(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(descriptionList)
+        });
+        if (!resp.ok) throw new Error('Status ' + resp.status);
+        showStatus('Descriptions list saved.', 'success');
+    } catch (e) {
+        console.error('Save descriptions error:', e);
+        showStatus('Error saving descriptions list: ' + e.message, 'error');
     }
 }
 
@@ -4218,10 +4272,12 @@ async function exportAllData() {
             customerCount: customerList.length,
             vendorCount: vendorList.length,
             serviceCount: serviceList.length,
+            descriptionCount: descriptionList.length,
             quotes: quoteIndex,
             customers: customerList,
             vendors: vendorList,
             services: serviceList,
+            descriptions: descriptionList,
             salesReps: salesReps
         };
 
@@ -4235,7 +4291,7 @@ async function exportAllData() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        showStatus('Backup exported! ' + quoteIndex.length + ' quotes, ' + customerList.length + ' customers, ' + vendorList.length + ' vendors, ' + serviceList.length + ' services.', 'success');
+        showStatus('Backup exported! ' + quoteIndex.length + ' quotes, ' + customerList.length + ' customers, ' + vendorList.length + ' vendors, ' + serviceList.length + ' services, ' + descriptionList.length + ' descriptions.', 'success');
     } catch (e) {
         console.error('Export error:', e);
         showStatus('Export failed: ' + e.message, 'error');
@@ -4405,6 +4461,139 @@ async function deleteService(idx) {
     renderServiceList();
     await saveToolsServices();
     showStatus('Item/service removed.', 'success');
+}
+
+// =============================================
+// DESCRIPTION MANAGEMENT
+// =============================================
+function renderDescriptionList() {
+    var container = document.getElementById('descriptionsList');
+    if (!container) return;
+    container.innerHTML = '';
+    var countEl = document.getElementById('descriptionCount');
+    if (countEl) countEl.textContent = '(' + descriptionList.length + ')';
+    var search = (document.getElementById('toolsDescriptionSearch') || {}).value || '';
+    search = search.toLowerCase().trim();
+
+    var filtered = descriptionList;
+    if (search) {
+        filtered = descriptionList.filter(function(d) {
+            return d.name && d.name.toLowerCase().indexOf(search) !== -1;
+        });
+    }
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;">' + (descriptionList.length === 0 ? 'No descriptions yet. Add one to get started!' : 'No matches found.') + '</div>';
+        return;
+    }
+    filtered.forEach(function(d) {
+        var realIdx = descriptionList.indexOf(d);
+        var div = document.createElement('div');
+        div.className = 'tools-list-item';
+        div.innerHTML =
+            '<div class="item-info"><div class="item-name">' + d.name + '</div></div>' +
+            '<div class="item-actions">' +
+            '<button class="btn-icon btn-icon-edit" onclick="openDescriptionForm(' + realIdx + ')" title="Edit">&#9998;</button>' +
+            '<button class="btn-icon btn-icon-delete" onclick="deleteDescription(' + realIdx + ')" title="Delete">&#128465;</button>' +
+            '</div>';
+        container.appendChild(div);
+    });
+}
+
+function openDescriptionForm(idx) {
+    document.getElementById('descriptionFormOverlay').classList.add('active');
+    if (typeof idx === 'number' && idx >= 0) {
+        document.getElementById('descriptionFormTitle').textContent = 'Edit Description';
+        document.getElementById('descriptionFormIndex').value = idx;
+        document.getElementById('descriptionFormName').value = descriptionList[idx].name || '';
+    } else {
+        document.getElementById('descriptionFormTitle').textContent = 'Add Description';
+        document.getElementById('descriptionFormIndex').value = -1;
+        document.getElementById('descriptionFormName').value = '';
+    }
+    document.getElementById('descriptionFormName').focus();
+}
+
+function closeDescriptionForm() {
+    document.getElementById('descriptionFormOverlay').classList.remove('active');
+}
+
+async function saveDescriptionForm() {
+    var idx = parseInt(document.getElementById('descriptionFormIndex').value);
+    var name = document.getElementById('descriptionFormName').value.trim();
+    if (!name) { alert('Please enter a description.'); return; }
+
+    if (idx >= 0) {
+        descriptionList[idx].name = name;
+    } else {
+        var exists = descriptionList.some(function(d) { return d.name.toLowerCase() === name.toLowerCase(); });
+        if (exists) { alert('Description "' + name + '" already exists.'); return; }
+        descriptionList.push({ name: name });
+    }
+    descriptionList.sort(function(a, b) { return a.name.localeCompare(b.name); });
+    renderDescriptionList();
+    closeDescriptionForm();
+    await saveToolsDescriptions();
+    showStatus('Description saved!', 'success');
+}
+
+async function deleteDescription(idx) {
+    if (!confirm('Remove "' + descriptionList[idx].name + '" from descriptions list?')) return;
+    descriptionList.splice(idx, 1);
+    renderDescriptionList();
+    await saveToolsDescriptions();
+    showStatus('Description removed.', 'success');
+}
+
+// =============================================
+// DESCRIPTION AUTOCOMPLETE (Simple Quote Description fields)
+// =============================================
+function showDescriptionSuggestions(rowIdx, query) {
+    acActiveIndex = -1;
+    var list = document.getElementById('descAC_' + rowIdx);
+    if (!list) return;
+    list.innerHTML = '';
+    if (!query || query.length < 1) { list.classList.remove('active'); return; }
+
+    var q = query.toLowerCase();
+    var matches = descriptionList.filter(function(d) {
+        return d.name.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+
+    if (matches.length === 0) { list.classList.remove('active'); return; }
+
+    matches.forEach(function(d) {
+        var div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.innerHTML = '<div class="ac-name">' + d.name + '</div>';
+        div.onclick = function() {
+            document.getElementById('simpleDesc_' + rowIdx).value = d.name;
+            list.classList.remove('active');
+        };
+        list.appendChild(div);
+    });
+    list.classList.add('active');
+}
+
+function promptSaveDescription(input) {
+    if (acJustSelected) { acJustSelected = false; return; }
+    var name = (input.value || '').trim();
+    if (!name || name.length < 3) return;
+    // Don't prompt if dropdown is still showing
+    var parentTd = input.parentElement;
+    if (parentTd) {
+        var acList = parentTd.querySelector('.autocomplete-list.active');
+        if (acList) { acList.classList.remove('active'); return; }
+    }
+    var exists = descriptionList.some(function(d) { return d.name.toLowerCase() === name.toLowerCase(); });
+    if (!exists) {
+        if (confirm('Add "' + name + '" to descriptions list?')) {
+            descriptionList.push({ name: name });
+            descriptionList.sort(function(a, b) { return a.name.localeCompare(b.name); });
+            saveToolsDescriptions(); // fire and forget
+            showStatus('Description "' + name + '" added!', 'success');
+        }
+    }
 }
 
 // =============================================
@@ -4874,6 +5063,14 @@ function attachAutoCompleteKeyHandlers() {
                 sItem.addEventListener('keydown', function(e) {
                     var list = document.getElementById('serviceAC_' + idx);
                     acKeyHandler(e, list, sItem, null);
+                });
+            }
+            // Simple quote: simpleDesc (description) autocomplete
+            var sDesc = document.getElementById('simpleDesc_' + idx);
+            if (sDesc) {
+                sDesc.addEventListener('keydown', function(e) {
+                    var list = document.getElementById('descAC_' + idx);
+                    acKeyHandler(e, list, sDesc, null);
                 });
             }
         })(i);
