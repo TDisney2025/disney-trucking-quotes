@@ -1037,6 +1037,9 @@
                     <button class="btn-add-item" onclick="if(confirm('Migrate all quotes to individual files? This takes 5-10 minutes.')) migrateToIndividualFiles()" style="background:linear-gradient(135deg,#9c27b0,#7b1fa2);">&#128640; Migrate to Individual Files</button>
                     <p style="font-size:12px;color:#888;margin-top:8px;">One-time migration: saves each quote as its own file on OneDrive for conflict-free multi-PC use.</p>
                     <hr style="margin:12px 0;border:none;border-top:1px solid #eee;">
+                    <button class="btn-add-item" onclick="if(confirm('Full restore: merge baseline + individual files + cache, then migrate ALL to individual files. This takes 10-15 minutes.')) fullRestoreAndMigrate()" style="background:linear-gradient(135deg,#c00000,#ff4444);">&#128680; Full Restore &amp; Migrate</button>
+                    <p style="font-size:12px;color:#888;margin-top:8px;">Nuclear option: merges ALL sources (baseline backup + individual files + cache), updates the index, then migrates everything to individual files.</p>
+                    <hr style="margin:12px 0;border:none;border-top:1px solid #eee;">
                     <button class="btn-add-item" onclick="exportAllData()" style="background:linear-gradient(135deg,#28a745,#20c997);">&#128230; Export All Data (Backup)</button>
                     <p style="font-size:12px;color:#888;margin-top:8px;">Download a backup of all quotes, customers, vendors, and services as a JSON file</p>
                 </div>
@@ -2688,73 +2691,128 @@ async function loadQuoteIndex() {
         const response = await fetch(url, {
             headers: { "Authorization": `Bearer ${accessToken}` }
         });
+        var cloudData = [];
         if (response.ok) {
             var rawData = await response.json();
-            var cloudData;
-            // Handle v2 format: { version: 2, quotes: [...] }
             if (rawData && rawData.version === 2 && Array.isArray(rawData.quotes)) {
                 cloudData = rawData.quotes;
             } else if (Array.isArray(rawData)) {
-                // Old format: bare array
                 cloudData = rawData;
-            } else {
-                cloudData = [];
-            }
-
-            if (cloudData.length > 0) {
-                // SAFETY: If cache looks suspiciously small, verify against individual files
-                if (cloudData.length < 2000) {
-                    console.warn('loadQuoteIndex: cache only has ' + cloudData.length + ' entries (expected 2000+). Checking individual files...');
-                    // Quick check: count files in quotes/ folder
-                    try {
-                        var countUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes:/children?$top=1&$count=true';
-                        var countResp = await fetch(countUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
-                        if (countResp.ok) {
-                            var countData = await countResp.json();
-                            var fileCount = countData['@odata.count'] || (countData.value ? countData.value.length : 0);
-                            // If there are significantly more individual files than cache entries, rebuild
-                            if (fileCount > cloudData.length * 1.5 || fileCount > 1000) {
-                                console.warn('loadQuoteIndex: individual files (' + fileCount + '+) >> cache (' + cloudData.length + '). Rebuilding from files...');
-                                showStatus('Cache appears stale (' + cloudData.length + ' entries). Rebuilding from individual files...', 'info');
-                                await rebuildIndexFromFiles();
-                            } else {
-                                // Folder might not support $count, or files haven't been migrated yet
-                                quoteIndex = cloudData;
-                                console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache (could not verify file count)');
-                            }
-                        } else if (countResp.status === 404) {
-                            // quotes/ folder doesn't exist yet — no individual files, use cache as-is
-                            quoteIndex = cloudData;
-                            console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache (no quotes/ folder yet)');
-                        } else {
-                            quoteIndex = cloudData;
-                        }
-                    } catch (checkErr) {
-                        console.log('loadQuoteIndex: could not check file count, using cache:', checkErr);
-                        quoteIndex = cloudData;
-                    }
-                } else {
-                    quoteIndex = cloudData;
-                    console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache');
-                }
-            } else if (quoteIndex.length === 0) {
-                // Cache is empty and we have nothing locally — try rebuilding from individual files
-                console.log('loadQuoteIndex: cache empty, attempting rebuild from individual files...');
-                await rebuildIndexFromFiles();
-            } else {
-                console.log('loadQuoteIndex: cache empty but local has ' + quoteIndex.length + ' entries, keeping local');
-            }
-        } else if (response.status === 404) {
-            // No cache file exists — rebuild from individual files
-            if (quoteIndex.length === 0) {
-                console.log('loadQuoteIndex: no cache file, rebuilding from individual files...');
-                await rebuildIndexFromFiles();
             }
         }
+
+        if (cloudData.length >= 2000) {
+            // Cache looks healthy
+            quoteIndex = cloudData;
+            console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache');
+            return;
+        }
+
+        // Cache is missing or too small — try merging baseline + individual files
+        console.warn('loadQuoteIndex: cache has ' + cloudData.length + ' entries (expected 2000+). Recovering...');
+
+        // Step 1: Try loading the baseline file (protected copy of all historical quotes)
+        var baselineData = [];
+        try {
+            var baseUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-baseline.json:/content';
+            var baseResp = await fetch(baseUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+            if (baseResp.ok) {
+                baselineData = await baseResp.json();
+                if (!Array.isArray(baselineData)) baselineData = [];
+                console.log('loadQuoteIndex: baseline has ' + baselineData.length + ' entries');
+            }
+        } catch (e) { console.log('Baseline load failed:', e); }
+
+        // Step 2: Build merged index from all sources (baseline + cache + individual files)
+        var merged = {};
+        // Add baseline entries
+        for (var i = 0; i < baselineData.length; i++) {
+            var bq = baselineData[i];
+            var bkey = bq.quoteNumber || ('nonum|' + (bq.customerName||'') + '|' + (bq.jobName||'') + '|' + (bq.savedDate||''));
+            merged[bkey] = bq;
+        }
+        // Add cache entries (newer wins)
+        for (var j = 0; j < cloudData.length; j++) {
+            var cq = cloudData[j];
+            var ckey = cq.quoteNumber || ('nonum|' + (cq.customerName||'') + '|' + (cq.jobName||'') + '|' + (cq.savedDate||''));
+            var cexisting = merged[ckey];
+            if (!cexisting) {
+                merged[ckey] = cq;
+            } else {
+                var cd1 = cq.savedDate ? new Date(cq.savedDate) : new Date(0);
+                var cd2 = cexisting.savedDate ? new Date(cexisting.savedDate) : new Date(0);
+                if (cd1 > cd2) merged[ckey] = cq;
+            }
+        }
+
+        // Step 3: Scan individual files for any quotes not in baseline/cache
+        try {
+            var nextLink = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes:/children?$top=200&$select=id,name';
+            var fileList = [];
+            while (nextLink) {
+                var listResp = await fetch(nextLink, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+                if (!listResp.ok) break;
+                var listData = await listResp.json();
+                var items = listData.value || [];
+                for (var fi = 0; fi < items.length; fi++) {
+                    if (items[fi].name && items[fi].name.endsWith('.json')) fileList.push(items[fi]);
+                }
+                nextLink = listData['@odata.nextLink'] || null;
+            }
+            console.log('loadQuoteIndex: found ' + fileList.length + ' individual files');
+
+            if (fileList.length > 0) {
+                showStatus('Recovering quotes from ' + fileList.length + ' individual files...', 'info');
+                var batchSize = 10;
+                var newFromFiles = 0;
+                for (var fb = 0; fb < fileList.length; fb += batchSize) {
+                    var batch = fileList.slice(fb, fb + batchSize);
+                    var promises = batch.map(function(item) {
+                        return fetch('https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + item.id + '/content',
+                            { headers: { 'Authorization': 'Bearer ' + accessToken } })
+                            .then(function(r) { return r.ok ? r.json() : null; })
+                            .catch(function() { return null; });
+                    });
+                    var results = await Promise.all(promises);
+                    for (var ri = 0; ri < results.length; ri++) {
+                        if (!results[ri]) continue;
+                        var fq = results[ri];
+                        var fkey = fq.quoteNumber || ('nonum|' + (fq.customerName||'') + '|' + (fq.jobName||'') + '|' + (fq.savedDate||''));
+                        var fexisting = merged[fkey];
+                        if (!fexisting) {
+                            merged[fkey] = fq;
+                            newFromFiles++;
+                        } else {
+                            var fd1 = fq.savedDate ? new Date(fq.savedDate) : new Date(0);
+                            var fd2 = fexisting.savedDate ? new Date(fexisting.savedDate) : new Date(0);
+                            if (fd1 > fd2) { merged[fkey] = fq; newFromFiles++; }
+                        }
+                    }
+                    if (fb + batchSize < fileList.length) {
+                        await new Promise(function(w) { setTimeout(w, 500); });
+                    }
+                }
+                console.log('loadQuoteIndex: ' + newFromFiles + ' quotes added/updated from individual files');
+            }
+        } catch (fileErr) { console.log('Individual file scan error:', fileErr); }
+
+        // Build final array
+        var mergedArr = Object.values(merged);
+        mergedArr.sort(function(a, b) {
+            var da = a.savedDate ? new Date(a.savedDate) : new Date(0);
+            var db = b.savedDate ? new Date(b.savedDate) : new Date(0);
+            return db - da;
+        });
+
+        quoteIndex = mergedArr;
+        console.log('loadQuoteIndex: recovered ' + quoteIndex.length + ' entries (baseline + cache + files)');
+        if (quoteIndex.length > 0) {
+            showStatus('Recovered ' + quoteIndex.length + ' quotes. Updating cache...', 'success');
+            await updateIndexCache();
+        }
     } catch (error) {
-        console.log("loadQuoteIndex error, keeping current data:", error);
+        console.log("loadQuoteIndex error:", error);
         if (quoteIndex.length === 0) {
-            // Last resort: try rebuilding from individual files
             try { await rebuildIndexFromFiles(); } catch (e) { console.log('Rebuild also failed:', e); }
         }
     }
@@ -3082,6 +3140,24 @@ async function migrateToIndividualFiles() {
     } catch (err) {
         console.error('Migration error:', err);
         showStatus('Migration error: ' + err.message + '. ' + migrated + ' files saved so far.', 'error');
+    }
+}
+
+// Full restore: load baseline + individual files + cache, merge all, then migrate everything
+async function fullRestoreAndMigrate() {
+    showStatus('Full restore starting...', 'info');
+    try {
+        await getToken();
+        // Step 1: Force a full load (which now merges baseline + cache + individual files)
+        quoteIndex = []; // Clear so loadQuoteIndex does full recovery
+        await loadQuoteIndex();
+        showStatus('Restore complete: ' + quoteIndex.length + ' quotes recovered. Now migrating to individual files...', 'info');
+        // Step 2: Run migration to ensure ALL quotes are saved as individual files
+        await migrateToIndividualFiles();
+        showStatus('Full restore & migrate complete! ' + quoteIndex.length + ' quotes secured.', 'success');
+    } catch (err) {
+        console.error('fullRestoreAndMigrate error:', err);
+        showStatus('Restore error: ' + err.message, 'error');
     }
 }
 
