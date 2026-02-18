@@ -2,7 +2,8 @@
 <html>
 <head>
     <title>Upload Quote Index</title>
-    <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+    <script src="lib/msal-browser.min.js"></script>
+    <script>if (typeof msal === 'undefined') document.write('<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"><\/script>');</script>
 </head>
 <body style="font-family: Arial; padding: 40px; max-width: 800px; margin: 0 auto;">
     <h1>Upload Quote Index to OneDrive</h1>
