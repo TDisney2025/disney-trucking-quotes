@@ -21,16 +21,7 @@
     <script>
     var driveId = 'b!TPqAcGPQcEGtQwdXSUltla7kgkyjSydDiw77YGuYjOp24PuGcU4_T4_FWyisLZdY';
     var folderId = '01OYENQWBAYNQOU4HVFVGKAGVV56JQF465';
-
-    var msalConfig = {
-        auth: {
-            clientId: '6ee979b4-0599-4be3-b8b2-f7ffacfeec40',
-            authority: 'https://login.microsoftonline.com/d2b061e1-8d76-42bf-991a-3daca8e3d31d',
-            redirectUri: window.location.origin
-        }
-    };
-
-    var msalInstance = new msal.PublicClientApplication(msalConfig);
+    var msalInstance = null;
 
     function log(msg) {
         var el = document.getElementById('log');
@@ -44,10 +35,26 @@
 
     async function doUpload() {
         try {
-            await msalInstance.initialize();
+            // Create and initialize MSAL inside the async function
+            if (!msalInstance) {
+                log('Initializing MSAL...');
+                var msalConfig = {
+                    auth: {
+                        clientId: '6ee979b4-0599-4be3-b8b2-f7ffacfeec40',
+                        authority: 'https://login.microsoftonline.com/d2b061e1-8d76-42bf-991a-3daca8e3d31d',
+                        redirectUri: window.location.origin
+                    },
+                    cache: {
+                        cacheLocation: 'sessionStorage'
+                    }
+                };
+                msalInstance = new msal.PublicClientApplication(msalConfig);
+                await msalInstance.initialize();
+                log('MSAL initialized.');
+            }
 
             setStatus('Signing in...');
-            log('Requesting sign-in...');
+            log('Requesting sign-in popup...');
 
             var loginResponse = await msalInstance.loginPopup({
                 scopes: ['Files.ReadWrite.All']
@@ -68,21 +75,22 @@
             var contentUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index.json:/content';
 
             var cloudResp = await fetch(contentUrl, { headers: { 'Authorization': 'Bearer ' + token } });
+            var cloudData = null;
             if (cloudResp.ok) {
-                var cloudData = await cloudResp.json();
+                cloudData = await cloudResp.json();
                 log('Cloud currently has ' + cloudData.length + ' entries.');
             } else {
                 log('Could not read cloud index: ' + cloudResp.status);
             }
 
             // Step 2: Create backup of cloud version first
-            setStatus('Backing up current cloud version...');
-            var today = new Date();
-            var dateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
-            var backupName = 'quote-index-backup-' + dateStr + '-pre-restore.json';
-            var backupUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/' + encodeURIComponent(backupName) + ':/content';
+            if (cloudData) {
+                setStatus('Backing up current cloud version...');
+                var today = new Date();
+                var dateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+                var backupName = 'quote-index-backup-' + dateStr + '-pre-restore.json';
+                var backupUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/' + encodeURIComponent(backupName) + ':/content';
 
-            if (cloudResp.ok) {
                 await fetch(backupUrl, {
                     method: 'PUT',
                     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -91,11 +99,10 @@
                 log('Backup saved as: ' + backupName);
             }
 
-            // Step 3: The full index data (embedded)
-            setStatus('Preparing full index for upload...');
-            log('Loading full index via file input...');
+            // Step 3: File picker to load the local JSON
+            setStatus('Select the quote-index.json file from your Quotes folder...');
+            log('Opening file picker — select your local quote-index.json...');
 
-            // Use file picker to load the local JSON
             var input = document.createElement('input');
             input.type = 'file';
             input.accept = '.json';
@@ -106,7 +113,14 @@
 
                 log('Reading file: ' + file.name + ' (' + file.size + ' bytes)');
                 var text = await file.text();
-                var fullIndex = JSON.parse(text);
+                var fullIndex;
+                try {
+                    fullIndex = JSON.parse(text);
+                } catch (parseErr) {
+                    log('ERROR: Could not parse JSON. Is this the right file?');
+                    setStatus('Error — invalid JSON file.');
+                    return;
+                }
                 log('File contains ' + fullIndex.length + ' entries.');
 
                 if (fullIndex.length < 2000) {
@@ -129,7 +143,7 @@
                     var result = await uploadResp.json();
                     log('SUCCESS! Uploaded ' + fullIndex.length + ' entries (' + result.size + ' bytes)');
                     log('Last modified: ' + result.lastModifiedDateTime);
-                    setStatus('Done! ' + fullIndex.length + ' entries uploaded. Refresh the quote app (Ctrl+Shift+R).');
+                    setStatus('Done! ' + fullIndex.length + ' entries uploaded. Now go to quotes.disneytrucking.com and press Ctrl+Shift+R.');
                     document.getElementById('uploadBtn').style.background = '#28a745';
                     document.getElementById('uploadBtn').textContent = 'Upload Complete!';
                 } else {
@@ -139,15 +153,12 @@
                 }
             };
 
-            // Trigger file picker
-            log('Please select your local quote-index.json file...');
-            setStatus('Select the quote-index.json file from your Quotes folder...');
             input.click();
 
         } catch (err) {
             log('Error: ' + err.message);
-            setStatus('Error — see log.');
             console.error(err);
+            setStatus('Error — see log. You may need to allow popups for this site.');
         }
     }
     </script>
