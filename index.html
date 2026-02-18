@@ -2702,8 +2702,41 @@ async function loadQuoteIndex() {
             }
 
             if (cloudData.length > 0) {
-                quoteIndex = cloudData;
-                console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache');
+                // SAFETY: If cache looks suspiciously small, verify against individual files
+                if (cloudData.length < 2000) {
+                    console.warn('loadQuoteIndex: cache only has ' + cloudData.length + ' entries (expected 2000+). Checking individual files...');
+                    // Quick check: count files in quotes/ folder
+                    try {
+                        var countUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes:/children?$top=1&$count=true';
+                        var countResp = await fetch(countUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+                        if (countResp.ok) {
+                            var countData = await countResp.json();
+                            var fileCount = countData['@odata.count'] || (countData.value ? countData.value.length : 0);
+                            // If there are significantly more individual files than cache entries, rebuild
+                            if (fileCount > cloudData.length * 1.5 || fileCount > 1000) {
+                                console.warn('loadQuoteIndex: individual files (' + fileCount + '+) >> cache (' + cloudData.length + '). Rebuilding from files...');
+                                showStatus('Cache appears stale (' + cloudData.length + ' entries). Rebuilding from individual files...', 'info');
+                                await rebuildIndexFromFiles();
+                            } else {
+                                // Folder might not support $count, or files haven't been migrated yet
+                                quoteIndex = cloudData;
+                                console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache (could not verify file count)');
+                            }
+                        } else if (countResp.status === 404) {
+                            // quotes/ folder doesn't exist yet — no individual files, use cache as-is
+                            quoteIndex = cloudData;
+                            console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache (no quotes/ folder yet)');
+                        } else {
+                            quoteIndex = cloudData;
+                        }
+                    } catch (checkErr) {
+                        console.log('loadQuoteIndex: could not check file count, using cache:', checkErr);
+                        quoteIndex = cloudData;
+                    }
+                } else {
+                    quoteIndex = cloudData;
+                    console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache');
+                }
             } else if (quoteIndex.length === 0) {
                 // Cache is empty and we have nothing locally — try rebuilding from individual files
                 console.log('loadQuoteIndex: cache empty, attempting rebuild from individual files...');
