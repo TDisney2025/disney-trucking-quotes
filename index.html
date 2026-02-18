@@ -409,6 +409,10 @@
         .line-table .col-haul { width: 13%; }
         .line-table .col-unit { width: 10%; }
         .line-table .col-total { width: 13%; }
+        .line-table .col-simple-item { width: 25%; }
+        .line-table .col-simple-desc { width: 35%; }
+        .line-table .col-simple-units { width: 15%; }
+        .line-table .col-simple-price { width: 25%; }
         .line-table td input.money-input { text-align: right; }
         .line-table td select { text-align: center; }
 
@@ -538,6 +542,10 @@
             .line-table .col-haul { width: 14%; }
             .line-table .col-unit { width: 12%; }
             .line-table .col-total { width: 16%; }
+            .line-table .col-simple-item { width: 25%; }
+            .line-table .col-simple-desc { width: 35%; }
+            .line-table .col-simple-units { width: 15%; }
+            .line-table .col-simple-price { width: 25%; }
             .line-table td input, .line-table td select { font-size: 11px !important; padding: 2px 2px !important; }
             .line-table td { height: 28px; }
 
@@ -628,7 +636,8 @@
             <button class="btn-tool" id="toolsBtn" onclick="showView('tools')" style="background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;">&#9881; Tools</button>
             <button class="btn-tool btn-save" id="saveBtn" onclick="saveQuote()">&#128190; Save</button>
             <button class="btn-tool btn-email" id="btnEmail" onclick="handleEmailQuote()">&#9993; Email</button>
-            <button class="btn-tool btn-new" id="btnNew" onclick="handleNewQuote()">&#10010; New</button>
+            <button class="btn-tool btn-new" id="btnNew" onclick="handleNewQuote('detail')">&#10010; Detail</button>
+            <button class="btn-tool btn-new" id="btnNewSimple" onclick="handleNewQuote('simple')" style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;">&#10010; Simple</button>
             <button class="btn-tool btn-copy" id="btnCopy" onclick="handleCopyQuote()">&#128203; Copy</button>
             <button class="btn-tool btn-delete" id="btnDelete" onclick="handleDeleteQuote()">&#128465; Delete</button>
             <button class="btn-tool btn-search" onclick="openSearchModal()">&#128269; Search</button>
@@ -648,6 +657,8 @@
         <div class="mobile-menu-items">
             <button onclick="showView('dashboard');toggleMobileMenu();">&#128202; Dashboard</button>
             <button onclick="showView('tools');toggleMobileMenu();">&#9881; Tools</button>
+            <button onclick="handleNewQuote('detail');showView('quote');toggleMobileMenu();">&#10010; New Detail Quote</button>
+            <button onclick="handleNewQuote('simple');showView('quote');toggleMobileMenu();" style="color:#3b82f6;">&#10010; New Simple Quote</button>
             <button onclick="handleCopyQuote();toggleMobileMenu();">&#128203; Copy Quote</button>
             <button onclick="handleDeleteQuote();toggleMobileMenu();">&#128465; Delete Quote</button>
             <button onclick="handlePrintQuote();toggleMobileMenu();">&#128424; Print Quote</button>
@@ -666,7 +677,10 @@
                 <h1>&#128640; Quote Dashboard</h1>
                 <div class="dash-welcome">Welcome back, <span id="dashUserName"></span>! Here's your overview.</div>
             </div>
-            <button class="quick-btn" style="background: linear-gradient(135deg, #C00000, #ff4444); color:#fff;" onclick="handleNewQuote(); showView('quote');">&#10010; Create Quote</button>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="quick-btn" style="background: linear-gradient(135deg, #C00000, #ff4444); color:#fff;" onclick="handleNewQuote('detail'); showView('quote');">&#10010; Detail Quote</button>
+                <button class="quick-btn" style="background: linear-gradient(135deg, #1e40af, #3b82f6); color:#fff;" onclick="handleNewQuote('simple'); showView('quote');">&#10010; Simple Quote</button>
+            </div>
         </div>
 
         <!-- Stats Cards -->
@@ -857,7 +871,7 @@
 
             <!-- Line Items Table -->
             <div class="table-scroll-wrapper"><table class="line-table" id="quoteTable">
-                <thead>
+                <thead id="lineItemsHead">
                     <tr>
                         <th class="col-hauled">HAULED FROM</th>
                         <th class="col-item">ITEM / SERVICE</th>
@@ -1159,6 +1173,7 @@ var customerList = []; // Will be loaded from OneDrive
 var vendorList = [];   // Will be loaded from OneDrive
 var serviceList = [];  // Will be loaded from OneDrive
 var currentQuoteStatus = 'Draft'; // Track status of currently loaded quote
+var currentQuoteType = 'detail'; // 'detail' or 'simple'
 
 // Backward compatibility helper
 var salesRepEmails = {};
@@ -1585,18 +1600,52 @@ function updateFooterEmail() {
 // =============================================
 // LINE ITEMS TABLE
 // =============================================
+function updateLineItemsTable() {
+    var thead = document.getElementById('lineItemsHead');
+    if (currentQuoteType === 'simple') {
+        thead.innerHTML = '<tr>' +
+            '<th class="col-simple-item">ITEM / MATERIAL</th>' +
+            '<th class="col-simple-desc">DESCRIPTION</th>' +
+            '<th class="col-simple-units">UNITS</th>' +
+            '<th class="col-simple-price">PRICE</th>' +
+            '</tr>';
+    } else {
+        thead.innerHTML = '<tr>' +
+            '<th class="col-hauled">HAULED FROM</th>' +
+            '<th class="col-item">ITEM / SERVICE</th>' +
+            '<th class="col-material">MATERIAL</th>' +
+            '<th class="col-haul">HAUL</th>' +
+            '<th class="col-unit">UNIT</th>' +
+            '<th class="col-total">TOTAL</th>' +
+            '</tr>';
+    }
+    generateLineItems();
+    // Re-attach autocomplete keyboard handlers for the new inputs
+    if (typeof attachAutoCompleteKeyHandlers === 'function') {
+        attachAutoCompleteKeyHandlers();
+    }
+}
+
 function generateLineItems() {
     const tbody = document.getElementById('lineItemsBody');
     tbody.innerHTML = '';
     for (let i = 0; i < 16; i++) {
         const row = document.createElement('tr');
-        row.innerHTML =
-            '<td class="autocomplete-wrapper"><input type="text" id="hauledFrom_' + i + '" onblur="applySmartTitleCase(this); promptSaveVendor(this)" oninput="showVendorSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="vendorAC_' + i + '"></div></td>' +
-            '<td class="autocomplete-wrapper"><input type="text" id="itemService_' + i + '" onblur="applySmartTitleCase(this); promptSaveService(this)" oninput="showServiceSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="serviceAC_' + i + '"></div></td>' +
-            '<td><input type="text" id="material_' + i + '" class="money-input" inputmode="decimal" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
-            '<td><input type="text" id="haul_' + i + '" class="money-input" inputmode="decimal" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
-            '<td><select id="unit_' + i + '"><option value=""></option><option value="Ton">Ton</option><option value="Load">Load</option><option value="Yard">Yard</option><option value="Hourly">Hourly</option></select></td>' +
-            '<td class="total-cell" id="total_' + i + '"></td>';
+        if (currentQuoteType === 'simple') {
+            row.innerHTML =
+                '<td class="autocomplete-wrapper"><input type="text" id="simpleItem_' + i + '" onblur="applySmartTitleCase(this); promptSaveService(this)" oninput="showServiceSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="serviceAC_' + i + '"></div></td>' +
+                '<td><input type="text" id="simpleDesc_' + i + '"></td>' +
+                '<td><input type="text" id="simpleUnits_' + i + '"></td>' +
+                '<td><input type="text" id="simplePrice_' + i + '" class="money-input" inputmode="decimal" onblur="formatMoney(this)"></td>';
+        } else {
+            row.innerHTML =
+                '<td class="autocomplete-wrapper"><input type="text" id="hauledFrom_' + i + '" onblur="applySmartTitleCase(this); promptSaveVendor(this)" oninput="showVendorSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="vendorAC_' + i + '"></div></td>' +
+                '<td class="autocomplete-wrapper"><input type="text" id="itemService_' + i + '" onblur="applySmartTitleCase(this); promptSaveService(this)" oninput="showServiceSuggestions(' + i + ', this.value)" autocomplete="off"><div class="autocomplete-list" id="serviceAC_' + i + '"></div></td>' +
+                '<td><input type="text" id="material_' + i + '" class="money-input" inputmode="decimal" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
+                '<td><input type="text" id="haul_' + i + '" class="money-input" inputmode="decimal" oninput="calculateTotal(' + i + ')" onblur="formatMoney(this)"></td>' +
+                '<td><select id="unit_' + i + '"><option value=""></option><option value="Ton">Ton</option><option value="Load">Load</option><option value="Yard">Yard</option><option value="Hourly">Hourly</option></select></td>' +
+                '<td class="total-cell" id="total_' + i + '"></td>';
+        }
         tbody.appendChild(row);
     }
 }
@@ -1770,29 +1819,48 @@ async function generatePDF() {
 
     // ── Line items (always 16 rows) ──
     var rows = [];
+    var isSimple = (currentQuoteType === 'simple');
     for (var i = 0; i < 16; i++) {
-        rows.push({
-            hauledFrom: val('hauledFrom_' + i),
-            itemService: val('itemService_' + i),
-            material: val('material_' + i),
-            haul: val('haul_' + i),
-            unit: val('unit_' + i),
-            total: txt('total_' + i)
-        });
+        if (isSimple) {
+            rows.push({
+                simpleItem: val('simpleItem_' + i),
+                description: val('simpleDesc_' + i),
+                units: val('simpleUnits_' + i),
+                price: val('simplePrice_' + i)
+            });
+        } else {
+            rows.push({
+                hauledFrom: val('hauledFrom_' + i),
+                itemService: val('itemService_' + i),
+                material: val('material_' + i),
+                haul: val('haul_' + i),
+                unit: val('unit_' + i),
+                total: txt('total_' + i)
+            });
+        }
     }
 
     // ── Build table rows HTML ──
     var tableRowsHtml = '';
     for (var i = 0; i < 16; i++) {
         var r = rows[i];
-        tableRowsHtml += '<tr>' +
-            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.hauledFrom) + '</td>' +
-            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.itemService) + '</td>' +
-            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.material) + '</td>' +
-            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.haul) + '</td>' +
-            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.unit) + '</td>' +
-            '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#1e293b;">' + esc(r.total) + '</td>' +
-            '</tr>';
+        if (isSimple) {
+            tableRowsHtml += '<tr>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.simpleItem) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.description) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.units) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#1e293b;">' + esc(r.price) + '</td>' +
+                '</tr>';
+        } else {
+            tableRowsHtml += '<tr>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.hauledFrom) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;">' + esc(r.itemService) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.material) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.haul) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:center;">' + esc(r.unit) + '</td>' +
+                '<td style="font-size:11px;color:#475569;padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#1e293b;">' + esc(r.total) + '</td>' +
+                '</tr>';
+        }
     }
 
     // ── Customer card content ──
@@ -1871,12 +1939,19 @@ async function generatePDF() {
         '<table style="width:100%;border-collapse:separate;border-spacing:0;">' +
           '<thead>' +
             '<tr>' +
+              (isSimple ?
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:left;border-radius:8px 0 0 0;">Item / Material</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:left;">Description</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:center;">Units</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:right;border-radius:0 8px 0 0;">Price</th>'
+              :
               '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:left;border-radius:8px 0 0 0;">Hauled From</th>' +
               '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:left;">Item / Service</th>' +
               '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:center;">Material</th>' +
               '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:center;">Haul</th>' +
               '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:center;">Unit</th>' +
-              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:right;border-radius:0 8px 0 0;">Total</th>' +
+              '<th style="background:#1e293b;color:#fff;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:10px 10px;text-align:right;border-radius:0 8px 0 0;">Total</th>'
+              ) +
             '</tr>' +
           '</thead>' +
           '<tbody>' +
@@ -2090,7 +2165,9 @@ async function generateExcel() {
 
     // Row 13: Table header (red background, white text)
     var hdrRow = ws.getRow(13);
-    var hdrLabels = ['HAULED FROM:', 'ITEM / SERVICE', 'MATERIAL', 'HAUL', 'UNIT', 'TOTAL'];
+    var hdrLabels = (currentQuoteType === 'simple')
+        ? ['ITEM / MATERIAL', 'DESCRIPTION', 'UNITS', 'PRICE']
+        : ['HAULED FROM:', 'ITEM / SERVICE', 'MATERIAL', 'HAUL', 'UNIT', 'TOTAL'];
     for (var hi = 0; hi < hdrLabels.length; hi++) {
         var hCell = hdrRow.getCell(hi + 1);
         hCell.value = hdrLabels[hi];
@@ -2100,7 +2177,8 @@ async function generateExcel() {
         hCell.border = headerBorders;
     }
     // Fill remaining header cells with red
-    for (var hi = 7; hi <= 8; hi++) {
+    var maxCol = (currentQuoteType === 'simple') ? 8 : 8;
+    for (var hi = hdrLabels.length + 1; hi <= maxCol; hi++) {
         var hCell = hdrRow.getCell(hi);
         hCell.fill = redFill;
         hCell.border = headerBorders;
@@ -2113,54 +2191,91 @@ async function generateExcel() {
         var row = ws.getRow(r);
         row.height = 18;
 
-        var hauled = val('hauledFrom_' + i);
-        var item = val('itemService_' + i);
-        var matStr = document.getElementById('material_' + i).value;
-        var haulStr = document.getElementById('haul_' + i).value;
-        var unit = val('unit_' + i);
-        var totalStr = document.getElementById('total_' + i).textContent;
+        if (currentQuoteType === 'simple') {
+            var sItem = val('simpleItem_' + i);
+            var sDesc = val('simpleDesc_' + i);
+            var sUnits = val('simpleUnits_' + i);
+            var sPriceStr = document.getElementById('simplePrice_' + i).value;
+            var sPriceNum = sPriceStr ? parseFloat(sPriceStr.replace(/[^0-9.\-]/g, '')) : null;
 
-        var matNum = matStr ? parseFloat(matStr.replace(/[^0-9.\-]/g, '')) : null;
-        var haulNum = haulStr ? parseFloat(haulStr.replace(/[^0-9.\-]/g, '')) : null;
-        var totalNum = totalStr ? parseFloat(totalStr.replace(/[^0-9.\-]/g, '')) : null;
+            // Column A: ITEM / MATERIAL
+            row.getCell(1).value = sItem;
+            row.getCell(1).font = timesSmall;
+            row.getCell(1).border = allBorders;
 
-        // Column A: HAULED FROM
-        row.getCell(1).value = hauled;
-        row.getCell(1).font = timesSmall;
-        row.getCell(1).border = allBorders;
+            // Column B: DESCRIPTION
+            row.getCell(2).value = sDesc;
+            row.getCell(2).font = timesSmall;
+            row.getCell(2).alignment = { horizontal: 'left' };
+            row.getCell(2).border = allBorders;
 
-        // Column B: ITEM / SERVICE
-        row.getCell(2).value = item;
-        row.getCell(2).font = timesSmall;
-        row.getCell(2).alignment = { horizontal: 'center' };
-        row.getCell(2).border = allBorders;
+            // Column C: UNITS
+            row.getCell(3).value = sUnits;
+            row.getCell(3).font = timesSmall;
+            row.getCell(3).alignment = { horizontal: 'center' };
+            row.getCell(3).border = allBorders;
 
-        // Column C: MATERIAL
-        row.getCell(3).value = (matNum !== null && !isNaN(matNum)) ? matNum : '';
-        row.getCell(3).font = timesSmall;
-        row.getCell(3).numFmt = '#,##0.00';
-        row.getCell(3).alignment = { horizontal: 'right' };
-        row.getCell(3).border = allBorders;
+            // Column D: PRICE
+            row.getCell(4).value = (sPriceNum !== null && !isNaN(sPriceNum)) ? sPriceNum : '';
+            row.getCell(4).font = timesSmall;
+            row.getCell(4).numFmt = '#,##0.00';
+            row.getCell(4).alignment = { horizontal: 'right' };
+            row.getCell(4).border = allBorders;
 
-        // Column D: HAUL
-        row.getCell(4).value = (haulNum !== null && !isNaN(haulNum)) ? haulNum : '';
-        row.getCell(4).font = timesSmall;
-        row.getCell(4).numFmt = '#,##0.00';
-        row.getCell(4).alignment = { horizontal: 'right' };
-        row.getCell(4).border = allBorders;
+            // Columns E-F: empty but bordered
+            for (var ec = 5; ec <= 6; ec++) {
+                row.getCell(ec).border = allBorders;
+            }
+        } else {
+            var hauled = val('hauledFrom_' + i);
+            var item = val('itemService_' + i);
+            var matStr = document.getElementById('material_' + i).value;
+            var haulStr = document.getElementById('haul_' + i).value;
+            var unit = val('unit_' + i);
+            var totalStr = document.getElementById('total_' + i).textContent;
 
-        // Column E: UNIT
-        row.getCell(5).value = unit;
-        row.getCell(5).font = timesSmall;
-        row.getCell(5).alignment = { horizontal: 'center' };
-        row.getCell(5).border = allBorders;
+            var matNum = matStr ? parseFloat(matStr.replace(/[^0-9.\-]/g, '')) : null;
+            var haulNum = haulStr ? parseFloat(haulStr.replace(/[^0-9.\-]/g, '')) : null;
+            var totalNum = totalStr ? parseFloat(totalStr.replace(/[^0-9.\-]/g, '')) : null;
 
-        // Column F: TOTAL
-        row.getCell(6).value = (totalNum !== null && !isNaN(totalNum)) ? totalNum : '';
-        row.getCell(6).font = timesSmall;
-        row.getCell(6).numFmt = '#,##0.00';
-        row.getCell(6).alignment = { horizontal: 'right' };
-        row.getCell(6).border = allBorders;
+            // Column A: HAULED FROM
+            row.getCell(1).value = hauled;
+            row.getCell(1).font = timesSmall;
+            row.getCell(1).border = allBorders;
+
+            // Column B: ITEM / SERVICE
+            row.getCell(2).value = item;
+            row.getCell(2).font = timesSmall;
+            row.getCell(2).alignment = { horizontal: 'center' };
+            row.getCell(2).border = allBorders;
+
+            // Column C: MATERIAL
+            row.getCell(3).value = (matNum !== null && !isNaN(matNum)) ? matNum : '';
+            row.getCell(3).font = timesSmall;
+            row.getCell(3).numFmt = '#,##0.00';
+            row.getCell(3).alignment = { horizontal: 'right' };
+            row.getCell(3).border = allBorders;
+
+            // Column D: HAUL
+            row.getCell(4).value = (haulNum !== null && !isNaN(haulNum)) ? haulNum : '';
+            row.getCell(4).font = timesSmall;
+            row.getCell(4).numFmt = '#,##0.00';
+            row.getCell(4).alignment = { horizontal: 'right' };
+            row.getCell(4).border = allBorders;
+
+            // Column E: UNIT
+            row.getCell(5).value = unit;
+            row.getCell(5).font = timesSmall;
+            row.getCell(5).alignment = { horizontal: 'center' };
+            row.getCell(5).border = allBorders;
+
+            // Column F: TOTAL
+            row.getCell(6).value = (totalNum !== null && !isNaN(totalNum)) ? totalNum : '';
+            row.getCell(6).font = timesSmall;
+            row.getCell(6).numFmt = '#,##0.00';
+            row.getCell(6).alignment = { horizontal: 'right' };
+            row.getCell(6).border = allBorders;
+        }
 
         // Columns G-H: empty but bordered (part of table visual)
         for (var ec = 7; ec <= 8; ec++) {
@@ -2445,7 +2560,7 @@ function promptSaveCustomerEmail() {
 // =============================================
 // NEW QUOTE
 // =============================================
-async function handleNewQuote() {
+async function handleNewQuote(type) {
     // No confirmation — just create new quote immediately
 
     try {
@@ -2467,6 +2582,9 @@ async function handleNewQuote() {
             }
         }
 
+        // Set quote type
+        currentQuoteType = type || 'detail';
+
         // Set new quote number
         document.getElementById('quoteNumber').value = newNum;
 
@@ -2483,19 +2601,13 @@ async function handleNewQuote() {
         // Reset dates
         initializeDates();
 
-        // Clear line items
-        for (let i = 0; i < 16; i++) {
-            document.getElementById('hauledFrom_' + i).value = '';
-            document.getElementById('itemService_' + i).value = '';
-            document.getElementById('material_' + i).value = '';
-            document.getElementById('haul_' + i).value = '';
-            document.getElementById('unit_' + i).value = '';
-            document.getElementById('total_' + i).textContent = '';
-        }
+        // Rebuild line items table for the correct type (also clears all fields)
+        updateLineItemsTable();
 
         currentQuoteStatus = 'Draft';
         updateStatusBadge();
-        showStatus('New quote #' + newNum + ' created.', 'success');
+        var typeLabel = currentQuoteType === 'simple' ? 'Simple' : 'Detail';
+        showStatus(typeLabel + ' quote #' + newNum + ' created.', 'success');
     } catch (error) {
         console.error('New quote error:', error);
         showStatus('Error creating new quote: ' + error.message, 'error');
@@ -2913,14 +3025,24 @@ async function migrateToIndividualFiles() {
 function getQuoteDataFromForm() {
     var lineItems = [];
     for (var i = 0; i < 16; i++) {
-        var hauled = document.getElementById('hauledFrom_' + i).value;
-        var item = document.getElementById('itemService_' + i).value;
-        var material = document.getElementById('material_' + i).value;
-        var haul = document.getElementById('haul_' + i).value;
-        var unit = document.getElementById('unit_' + i).value;
-        var total = document.getElementById('total_' + i).textContent;
-        if (hauled || item || material || haul) {
-            lineItems.push({ hauled: hauled, item: item, material: material, haul: haul, unit: unit, total: total });
+        if (currentQuoteType === 'simple') {
+            var simpleItem = document.getElementById('simpleItem_' + i).value;
+            var desc = document.getElementById('simpleDesc_' + i).value;
+            var units = document.getElementById('simpleUnits_' + i).value;
+            var price = document.getElementById('simplePrice_' + i).value;
+            if (simpleItem || desc || price) {
+                lineItems.push({ simpleItem: simpleItem, description: desc, units: units, price: price });
+            }
+        } else {
+            var hauled = document.getElementById('hauledFrom_' + i).value;
+            var item = document.getElementById('itemService_' + i).value;
+            var material = document.getElementById('material_' + i).value;
+            var haul = document.getElementById('haul_' + i).value;
+            var unit = document.getElementById('unit_' + i).value;
+            var total = document.getElementById('total_' + i).textContent;
+            if (hauled || item || material || haul) {
+                lineItems.push({ hauled: hauled, item: item, material: material, haul: haul, unit: unit, total: total });
+            }
         }
     }
 
@@ -2937,6 +3059,7 @@ function getQuoteDataFromForm() {
         terms: document.getElementById('terms').value,
         date: document.getElementById('dateField').textContent,
         validThrough: document.getElementById('validThrough').textContent,
+        quoteType: currentQuoteType,
         lineItems: lineItems,
         savedDate: new Date().toISOString(),
         status: currentQuoteStatus || 'Draft'
@@ -2944,6 +3067,10 @@ function getQuoteDataFromForm() {
 }
 
 function loadQuoteDataToForm(data) {
+    // Set quote type FIRST (before rebuilding line items table)
+    currentQuoteType = data.quoteType || 'detail';
+    updateLineItemsTable(); // Rebuilds thead + tbody for correct type
+
     document.getElementById('quoteNumber').value = data.quoteNumber || '';
     document.getElementById('customerName').value = data.customerName || '';
     document.getElementById('customerAddr1').value = data.customerAddr1 || '';
@@ -2958,26 +3085,23 @@ function loadQuoteDataToForm(data) {
     document.getElementById('validThrough').textContent = data.validThrough || '';
     updateFooterEmail();
 
-    // Clear all line items first
-    for (var i = 0; i < 16; i++) {
-        document.getElementById('hauledFrom_' + i).value = '';
-        document.getElementById('itemService_' + i).value = '';
-        document.getElementById('material_' + i).value = '';
-        document.getElementById('haul_' + i).value = '';
-        document.getElementById('unit_' + i).value = '';
-        document.getElementById('total_' + i).textContent = '';
-    }
-
-    // Load line items
+    // Load line items (table was already cleared by updateLineItemsTable)
     if (data.lineItems) {
         data.lineItems.forEach(function(item, i) {
             if (i < 16) {
-                document.getElementById('hauledFrom_' + i).value = item.hauled || '';
-                document.getElementById('itemService_' + i).value = item.item || '';
-                document.getElementById('material_' + i).value = item.material || '';
-                document.getElementById('haul_' + i).value = item.haul || '';
-                document.getElementById('unit_' + i).value = item.unit || '';
-                document.getElementById('total_' + i).textContent = item.total || '';
+                if (currentQuoteType === 'simple') {
+                    document.getElementById('simpleItem_' + i).value = item.simpleItem || '';
+                    document.getElementById('simpleDesc_' + i).value = item.description || '';
+                    document.getElementById('simpleUnits_' + i).value = item.units || '';
+                    document.getElementById('simplePrice_' + i).value = item.price || '';
+                } else {
+                    document.getElementById('hauledFrom_' + i).value = item.hauled || '';
+                    document.getElementById('itemService_' + i).value = item.item || '';
+                    document.getElementById('material_' + i).value = item.material || '';
+                    document.getElementById('haul_' + i).value = item.haul || '';
+                    document.getElementById('unit_' + i).value = item.unit || '';
+                    document.getElementById('total_' + i).textContent = item.total || '';
+                }
             }
         });
     }
@@ -3211,14 +3335,9 @@ async function handleDeleteQuote() {
         ['customerName', 'customerAddr1', 'customerAddr2', 'customerEmail', 'jobName', 'jobAddr1', 'jobAddr2'].forEach(function(id) {
             document.getElementById(id).value = '';
         });
-        for (var r = 0; r < 16; r++) {
-            document.getElementById('hauledFrom_' + r).value = '';
-            document.getElementById('itemService_' + r).value = '';
-            document.getElementById('material_' + r).value = '';
-            document.getElementById('haul_' + r).value = '';
-            document.getElementById('unit_' + r).value = '';
-            document.getElementById('total_' + r).textContent = '';
-        }
+        // Reset to detail type and rebuild line items (clears all fields)
+        currentQuoteType = 'detail';
+        updateLineItemsTable();
 
         // Go to dashboard
         showView('dashboard');
@@ -3248,7 +3367,7 @@ function showView(view) {
 
     // Show/hide quote-only buttons (Save, Email, Copy, Print only when quote is open)
     var isQuote = (view === 'quote');
-    var quoteButtons = ['saveBtn', 'btnEmail', 'btnNew', 'btnCopy', 'btnDelete', 'btnPrint'];
+    var quoteButtons = ['saveBtn', 'btnEmail', 'btnNew', 'btnNewSimple', 'btnCopy', 'btnDelete', 'btnPrint'];
     quoteButtons.forEach(function(id) {
         var btn = document.getElementById(id);
         if (btn) btn.style.display = isQuote ? '' : 'none';
@@ -4361,7 +4480,8 @@ function showServiceSuggestions(rowIdx, query) {
         div.className = 'autocomplete-item';
         div.innerHTML = '<div class="ac-name">' + s.name + '</div>';
         div.onclick = function() {
-            document.getElementById('itemService_' + rowIdx).value = s.name;
+            var fieldId = (currentQuoteType === 'simple') ? 'simpleItem_' + rowIdx : 'itemService_' + rowIdx;
+            document.getElementById(fieldId).value = s.name;
             list.classList.remove('active');
         };
         list.appendChild(div);
@@ -4414,20 +4534,34 @@ function validateQuoteForm() {
         jobName.classList.add('validation-error');
     }
 
-    // Check at least one line item has a price (material or haul, not both empty)
+    // Check at least one line item has a price
     var hasLineItem = false;
-    for (var i = 0; i < 16; i++) {
-        var mat = document.getElementById('material_' + i);
-        var haul = document.getElementById('haul_' + i);
-        var matVal = (mat.value || '').replace(/[^0-9.\-]/g, '');
-        var haulVal = (haul.value || '').replace(/[^0-9.\-]/g, '');
-        if (matVal || haulVal) {
-            hasLineItem = true;
-            break;
+    if (currentQuoteType === 'simple') {
+        for (var i = 0; i < 16; i++) {
+            var price = document.getElementById('simplePrice_' + i);
+            var priceVal = (price.value || '').replace(/[^0-9.\-]/g, '');
+            if (priceVal) {
+                hasLineItem = true;
+                break;
+            }
         }
-    }
-    if (!hasLineItem) {
-        errors.push('At least one line item must have a Material or Hauling price.');
+        if (!hasLineItem) {
+            errors.push('At least one line item must have a Price.');
+        }
+    } else {
+        for (var i = 0; i < 16; i++) {
+            var mat = document.getElementById('material_' + i);
+            var haul = document.getElementById('haul_' + i);
+            var matVal = (mat.value || '').replace(/[^0-9.\-]/g, '');
+            var haulVal = (haul.value || '').replace(/[^0-9.\-]/g, '');
+            if (matVal || haulVal) {
+                hasLineItem = true;
+                break;
+            }
+        }
+        if (!hasLineItem) {
+            errors.push('At least one line item must have a Material or Hauling price.');
+        }
     }
 
     if (errors.length > 0) {
@@ -4719,6 +4853,7 @@ function focusNextField(currentEl) {
 function attachAutoCompleteKeyHandlers() {
     for (var i = 0; i < 16; i++) {
         (function(idx) {
+            // Detail quote: hauledFrom (vendor) and itemService (service) autocomplete
             var hauled = document.getElementById('hauledFrom_' + idx);
             if (hauled) {
                 hauled.addEventListener('keydown', function(e) {
@@ -4731,6 +4866,14 @@ function attachAutoCompleteKeyHandlers() {
                 item.addEventListener('keydown', function(e) {
                     var list = document.getElementById('serviceAC_' + idx);
                     acKeyHandler(e, list, item, null);
+                });
+            }
+            // Simple quote: simpleItem (service) autocomplete
+            var sItem = document.getElementById('simpleItem_' + idx);
+            if (sItem) {
+                sItem.addEventListener('keydown', function(e) {
+                    var list = document.getElementById('serviceAC_' + idx);
+                    acKeyHandler(e, list, sItem, null);
                 });
             }
         })(i);
@@ -4747,12 +4890,17 @@ function attachAutoCompleteKeyHandlers() {
 }
 
 // Line items grid arrow key navigation
-var LINE_ITEM_COLS = ['hauledFrom', 'itemService', 'material', 'haul', 'unit'];
+function getLineItemCols() {
+    return currentQuoteType === 'simple'
+        ? ['simpleItem', 'simpleDesc', 'simpleUnits', 'simplePrice']
+        : ['hauledFrom', 'itemService', 'material', 'haul', 'unit'];
+}
 
 function getGridPosition(el) {
     var id = el.id || '';
-    for (var col = 0; col < LINE_ITEM_COLS.length; col++) {
-        var prefix = LINE_ITEM_COLS[col] + '_';
+    var cols = getLineItemCols();
+    for (var col = 0; col < cols.length; col++) {
+        var prefix = cols[col] + '_';
         if (id.indexOf(prefix) === 0) {
             var row = parseInt(id.substring(prefix.length), 10);
             if (!isNaN(row)) return { row: row, col: col };
@@ -4762,8 +4910,9 @@ function getGridPosition(el) {
 }
 
 function getGridElement(row, col) {
-    if (row < 0 || row > 15 || col < 0 || col >= LINE_ITEM_COLS.length) return null;
-    return document.getElementById(LINE_ITEM_COLS[col] + '_' + row);
+    var cols = getLineItemCols();
+    if (row < 0 || row > 15 || col < 0 || col >= cols.length) return null;
+    return document.getElementById(cols[col] + '_' + row);
 }
 
 // Enter key: advance to next field (when no autocomplete dropdown open)
