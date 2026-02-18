@@ -1673,8 +1673,8 @@ async function saveQuote() {
 
         // Save quote data to search index
         showStatus('Updating quote index...', 'info');
-        // If index not loaded yet, load it; otherwise use in-memory copy
-        if (quoteIndex.length === 0) await loadQuoteIndex();
+        // Always reload from cloud to get latest data before saving
+        await loadQuoteIndex();
         addQuoteToIndex(getQuoteDataFromForm());
         await saveQuoteIndex();
 
@@ -2376,7 +2376,8 @@ async function handleEmailQuote() {
         currentQuoteStatus = 'Sent';
         updateStatusBadge();
         try {
-            if (quoteIndex.length === 0) await loadQuoteIndex();
+            // Always reload from cloud to get latest data before saving
+            await loadQuoteIndex();
             addQuoteToIndex(getQuoteDataFromForm());
             await saveQuoteIndex();
         } catch (e) { console.log('Status save after email:', e); }
@@ -2564,28 +2565,42 @@ async function saveQuoteIndex() {
         try {
             const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
 
-            // SAFETY CHECK: fetch current cloud count before overwriting
+            // SAFETY: Always fetch cloud data, compare counts, and merge if needed
             try {
-                var checkResp = await fetch(url.replace(':/content', ''), {
+                var cloudResp = await fetch(url, {
                     headers: { "Authorization": `Bearer ${accessToken}` }
                 });
-                if (checkResp.ok) {
-                    var meta = await checkResp.json();
-                    var cloudSize = meta.size || 0;
-                    var localSize = JSON.stringify(quoteIndex).length;
-                    // Update ETag from metadata check
-                    quoteIndexETag = meta.eTag || meta['@odata.etag'] || quoteIndexETag;
-                    // If cloud file is significantly larger, don't overwrite (data loss protection)
-                    if (cloudSize > localSize * 1.5 && quoteIndex.length < 100) {
-                        console.error("SAFETY: Cloud index (" + cloudSize + " bytes) much larger than local (" + localSize + " bytes, " + quoteIndex.length + " entries). Aborting save to prevent data loss.");
-                        showStatus("Warning: Quote index save skipped — data mismatch detected. Please refresh.", "error");
-                        return;
+                if (cloudResp.ok) {
+                    var cloudIndex = await cloudResp.json();
+                    var cloudCount = Array.isArray(cloudIndex) ? cloudIndex.length : 0;
+                    var localCount = quoteIndex.length;
+
+                    console.log("Quote index save: cloud has " + cloudCount + " entries, local has " + localCount + " entries.");
+
+                    if (cloudCount > localCount) {
+                        // Cloud has MORE entries than local — merge to prevent data loss
+                        console.warn("MERGE: Cloud has " + cloudCount + " entries vs local " + localCount + ". Merging to prevent data loss.");
+                        quoteIndex = mergeQuoteIndices(quoteIndex, cloudIndex);
+                        console.log("After merge: " + quoteIndex.length + " entries.");
+                        showStatus("Merged " + (quoteIndex.length - localCount) + " missing quotes from cloud.", "info");
                     }
                 }
+
+                // Update ETag from metadata
+                var metaUrl = url.replace(':/content', '');
+                var metaResp = await fetch(metaUrl, { headers: { "Authorization": `Bearer ${accessToken}` } });
+                if (metaResp.ok) {
+                    var meta = await metaResp.json();
+                    quoteIndexETag = meta.eTag || meta['@odata.etag'] || quoteIndexETag;
+                }
             } catch (checkErr) {
-                console.log("Could not verify cloud index size:", checkErr);
+                console.log("Could not fetch cloud index for comparison:", checkErr);
             }
 
+            // Save daily backup before overwriting
+            await backupQuoteIndex();
+
+            // Now save the (possibly merged) index with ETag concurrency
             var headers = {
                 "Authorization": `Bearer ${accessToken}`,
                 "Content-Type": "application/json"
@@ -2602,11 +2617,10 @@ async function saveQuoteIndex() {
                 // ETag conflict — another user saved at the same time
                 console.log("Quote index conflict (attempt " + (attempt + 1) + "), reloading and merging...");
                 if (attempt < maxRetries - 1) {
-                    // Reload cloud index, merge our new entry, retry
                     var pendingEntry = quoteIndex[0]; // Our newly added entry is at front
                     await loadQuoteIndex();
                     if (pendingEntry && pendingEntry.quoteNumber) {
-                        addQuoteToIndex(pendingEntry); // Re-add our entry to the refreshed index
+                        addQuoteToIndex(pendingEntry);
                     }
                     await new Promise(function(r) { setTimeout(r, 500 + Math.random() * 500); });
                     continue;
@@ -2640,6 +2654,68 @@ function addQuoteToIndex(quoteData) {
     quoteIndex = quoteIndex.filter(q => q.quoteNumber !== quoteData.quoteNumber);
     quoteIndex.unshift(quoteData); // add to front (most recent first)
     // No cap — keep all quotes in the index
+}
+
+// Merge two quote index arrays, deduplicating by quoteNumber.
+// When both arrays have the same quoteNumber, keep the newer version (by savedDate).
+function mergeQuoteIndices(localIndex, cloudIndex) {
+    var merged = {};
+    // Add all cloud entries first
+    for (var i = 0; i < cloudIndex.length; i++) {
+        var q = cloudIndex[i];
+        var key = q.quoteNumber || ('no-num-' + i);
+        merged[key] = q;
+    }
+    // Then add/overwrite with local entries (keep newer version)
+    for (var j = 0; j < localIndex.length; j++) {
+        var lq = localIndex[j];
+        var lkey = lq.quoteNumber || ('no-num-local-' + j);
+        var existing = merged[lkey];
+        if (!existing) {
+            merged[lkey] = lq;
+        } else {
+            // Compare savedDate — keep whichever is newer
+            var localDate = lq.savedDate ? new Date(lq.savedDate) : new Date(0);
+            var cloudDate = existing.savedDate ? new Date(existing.savedDate) : new Date(0);
+            if (localDate >= cloudDate) {
+                merged[lkey] = lq;
+            }
+            // else keep cloud version (it's newer)
+        }
+    }
+    // Convert back to array and sort by savedDate descending (newest first)
+    var result = Object.values(merged);
+    result.sort(function(a, b) {
+        var da = a.savedDate ? new Date(a.savedDate) : new Date(0);
+        var db = b.savedDate ? new Date(b.savedDate) : new Date(0);
+        return db - da;
+    });
+    return result;
+}
+
+// Save a daily backup of quote-index.json before overwriting
+async function backupQuoteIndex() {
+    try {
+        var today = new Date();
+        var dateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+        var backupName = 'quote-index-backup-' + dateStr + '.json';
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/' + encodeURIComponent(backupName) + ':/content';
+
+        // Fetch current cloud version to back it up
+        var contentUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index.json:/content';
+        var resp = await fetch(contentUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (resp.ok) {
+            var cloudData = await resp.text();
+            await fetch(url, {
+                method: 'PUT',
+                headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+                body: cloudData
+            });
+            console.log('Daily backup saved: ' + backupName);
+        }
+    } catch (err) {
+        console.log('Backup failed (non-critical):', err);
+    }
 }
 
 function getQuoteDataFromForm() {
@@ -3356,7 +3432,8 @@ async function dashDeleteQuote(quoteNum) {
             }
         }
 
-        // Remove from quote index
+        // Remove from quote index — reload from cloud first to get latest
+        await loadQuoteIndex();
         quoteIndex = quoteIndex.filter(function(q) { return q.quoteNumber !== quoteNum; });
         await saveQuoteIndex();
 
