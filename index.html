@@ -2687,22 +2687,18 @@ let quoteIndex = [];
 
 async function loadQuoteIndex() {
     try {
-        const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/quote-index.json:/content`;
-        const response = await fetch(url, {
-            headers: { "Authorization": `Bearer ${accessToken}` }
-        });
+        // Load from quote-index-v2.json — a separate file that old code cannot overwrite
+        var v2Url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-v2.json:/content';
+        var v2Resp = await fetch(v2Url, { headers: { 'Authorization': 'Bearer ' + accessToken } });
         var cloudData = [];
-        if (response.ok) {
-            var rawData = await response.json();
-            if (rawData && rawData.version === 2 && Array.isArray(rawData.quotes)) {
-                // Only trust v2 format (written by new code)
-                cloudData = rawData.quotes;
+        if (v2Resp.ok) {
+            var v2Data = await v2Resp.json();
+            if (v2Data && v2Data.version === 2 && Array.isArray(v2Data.quotes)) {
+                cloudData = v2Data.quotes;
             }
-            // IGNORE bare arrays — they were written by old code and are unreliable
         }
 
         if (cloudData.length >= 2000) {
-            // v2 cache looks healthy
             quoteIndex = cloudData;
             console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from v2 cache');
             return;
@@ -2999,9 +2995,9 @@ async function updateIndexCache() {
         return;
     }
     try {
-        // Always write v2 format — old code writing bare arrays will be IGNORED by loadQuoteIndex
+        // Write to quote-index-v2.json — separate file that old code cannot overwrite
         var cacheData = { version: 2, quotes: quoteIndex };
-        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index.json:/content';
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-v2.json:/content';
         var resp = await fetch(url, {
             method: 'PUT',
             headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
