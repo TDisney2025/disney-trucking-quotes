@@ -3082,6 +3082,45 @@ async function rebuildIndexFromFiles() {
     }
 }
 
+// Upload a single quote file with retry on throttle/server errors
+async function uploadQuoteFileWithRetry(q, maxRetries) {
+    var fileName = getQuoteFileName(q);
+    if (!fileName) return 'skipped';
+    var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + fileName + ':/content';
+    for (var attempt = 0; attempt < (maxRetries || 3); attempt++) {
+        try {
+            var resp = await fetch(url, {
+                method: 'PUT',
+                headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+                body: JSON.stringify(q)
+            });
+            if (resp.ok) return 'ok';
+            if (resp.status === 429 || resp.status === 503 || resp.status === 504) {
+                // Throttled or server busy — wait and retry
+                var retryAfter = parseInt(resp.headers.get('Retry-After') || '5', 10);
+                console.log('Throttled on ' + fileName + ', waiting ' + retryAfter + 's (attempt ' + (attempt+1) + ')');
+                await new Promise(function(r) { setTimeout(r, retryAfter * 1000); });
+                continue;
+            }
+            if (resp.status === 401) {
+                // Token expired — refresh and retry
+                await getToken();
+                continue;
+            }
+            console.warn('Migration failed for ' + fileName + ': ' + resp.status);
+            return 'error';
+        } catch (err) {
+            if (attempt < (maxRetries || 3) - 1) {
+                await new Promise(function(r) { setTimeout(r, 3000); });
+                continue;
+            }
+            console.warn('Migration error for ' + fileName + ':', err);
+            return 'error';
+        }
+    }
+    return 'error';
+}
+
 // One-time migration: write each quote in quoteIndex as an individual file
 async function migrateToIndividualFiles() {
     if (quoteIndex.length === 0) {
@@ -3100,42 +3139,38 @@ async function migrateToIndividualFiles() {
         // Ensure quotes/ folder exists
         await getOrCreateQuotesFolder();
 
-        // Process in batches of 10
-        var batchSize = 10;
+        // Process in batches of 5 (smaller to avoid rate limits)
+        var batchSize = 5;
         for (var b = 0; b < total; b += batchSize) {
+            // Refresh token every 100 quotes to prevent expiry
+            if (b > 0 && b % 100 === 0) {
+                try { await getToken(); } catch (e) { console.log('Token refresh:', e); }
+            }
+
             var batch = quoteIndex.slice(b, b + batchSize);
             var promises = batch.map(function(q) {
-                var fileName = getQuoteFileName(q);
-                if (!fileName) {
-                    skipped++;
-                    return Promise.resolve();
-                }
-                var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + fileName + ':/content';
-                return fetch(url, {
-                    method: 'PUT',
-                    headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(q)
-                }).then(function(resp) {
-                    if (resp.ok) { migrated++; } else { errors++; console.warn('Migration failed for ' + fileName + ': ' + resp.status); }
-                }).catch(function(err) {
-                    errors++;
-                    console.warn('Migration error:', err);
-                });
+                return uploadQuoteFileWithRetry(q, 3);
             });
-            await Promise.all(promises);
+            var results = await Promise.all(promises);
+            for (var ri = 0; ri < results.length; ri++) {
+                if (results[ri] === 'ok') migrated++;
+                else if (results[ri] === 'skipped') skipped++;
+                else errors++;
+            }
+
             var done = Math.min(b + batchSize, total);
             showStatus('Migrating: ' + done + ' / ' + total + ' (' + migrated + ' saved, ' + skipped + ' skipped, ' + errors + ' errors)', 'info');
             console.log('Migration progress: ' + done + '/' + total);
             // Pause between batches to respect rate limits
             if (b + batchSize < total) {
-                await new Promise(function(resolve) { setTimeout(resolve, 2000); });
+                await new Promise(function(resolve) { setTimeout(resolve, 3000); });
             }
         }
 
         // Update cache with version 2 format
         await updateIndexCache();
 
-        showStatus('Migration complete! ' + migrated + ' quotes saved as individual files. ' + skipped + ' skipped (no quote number). ' + errors + ' errors.', 'success');
+        showStatus('Migration complete! ' + migrated + ' quotes saved as individual files. ' + skipped + ' skipped. ' + errors + ' errors.', 'success');
         console.log('migrateToIndividualFiles: done. Migrated=' + migrated + ' Skipped=' + skipped + ' Errors=' + errors);
     } catch (err) {
         console.error('Migration error:', err);
