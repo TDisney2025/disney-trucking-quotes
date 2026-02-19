@@ -2701,6 +2701,62 @@ async function loadQuoteIndex() {
         if (cloudData.length >= 2000) {
             quoteIndex = cloudData;
             console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from v2 cache');
+
+            // Quick check: are there individual files not in the cache?
+            try {
+                var knownFiles = {};
+                for (var ci = 0; ci < quoteIndex.length; ci++) {
+                    var cf = quoteIndex[ci].quoteNumber ? (quoteIndex[ci].quoteNumber + '.json') : getQuoteFileName(quoteIndex[ci]);
+                    knownFiles[cf] = true;
+                }
+                var missingQuotes = [];
+                var checkUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes:/children?$top=200&$select=id,name';
+                while (checkUrl) {
+                    var checkResp = await fetch(checkUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+                    if (!checkResp.ok) break;
+                    var checkData = await checkResp.json();
+                    var checkItems = checkData.value || [];
+                    for (var chi = 0; chi < checkItems.length; chi++) {
+                        if (checkItems[chi].name && checkItems[chi].name.endsWith('.json') && !knownFiles[checkItems[chi].name]) {
+                            missingQuotes.push(checkItems[chi]);
+                        }
+                    }
+                    checkUrl = checkData['@odata.nextLink'] || null;
+                }
+                if (missingQuotes.length > 0) {
+                    console.log('loadQuoteIndex: found ' + missingQuotes.length + ' files not in cache. Downloading...');
+                    showStatus('Loading ' + missingQuotes.length + ' newer quotes...', 'info');
+                    var dlBatch = 10;
+                    for (var db = 0; db < missingQuotes.length; db += dlBatch) {
+                        var dbSlice = missingQuotes.slice(db, db + dlBatch);
+                        var dlPromises = dbSlice.map(function(item) {
+                            return fetch('https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + item.id + '/content',
+                                { headers: { 'Authorization': 'Bearer ' + accessToken } })
+                                .then(function(r) { return r.ok ? r.json() : null; })
+                                .catch(function() { return null; });
+                        });
+                        var dlResults = await Promise.all(dlPromises);
+                        for (var dri = 0; dri < dlResults.length; dri++) {
+                            if (dlResults[dri]) quoteIndex.push(dlResults[dri]);
+                        }
+                        if (db + dlBatch < missingQuotes.length) {
+                            await new Promise(function(w) { setTimeout(w, 500); });
+                        }
+                    }
+                    quoteIndex.sort(function(a, b) {
+                        var da = a.savedDate ? new Date(a.savedDate) : new Date(0);
+                        var db2 = b.savedDate ? new Date(b.savedDate) : new Date(0);
+                        return db2 - da;
+                    });
+                    console.log('loadQuoteIndex: merged to ' + quoteIndex.length + ' entries. Updating cache...');
+                    showStatus('Loaded ' + quoteIndex.length + ' total quotes.', 'success');
+                    await updateIndexCache();
+                } else {
+                    console.log('loadQuoteIndex: cache is up to date');
+                }
+            } catch (syncErr) {
+                console.log('loadQuoteIndex: sync check error (non-critical):', syncErr);
+            }
             return;
         }
 
