@@ -2695,16 +2695,16 @@ async function loadQuoteIndex() {
         if (response.ok) {
             var rawData = await response.json();
             if (rawData && rawData.version === 2 && Array.isArray(rawData.quotes)) {
+                // Only trust v2 format (written by new code)
                 cloudData = rawData.quotes;
-            } else if (Array.isArray(rawData)) {
-                cloudData = rawData;
             }
+            // IGNORE bare arrays — they were written by old code and are unreliable
         }
 
         if (cloudData.length >= 2000) {
-            // Cache looks healthy
+            // v2 cache looks healthy
             quoteIndex = cloudData;
-            console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from cache');
+            console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from v2 cache');
             return;
         }
 
@@ -2992,7 +2992,14 @@ async function deleteIndividualQuote(quoteNum) {
 
 // Update the quote-index.json cache (non-critical — individual files are truth)
 async function updateIndexCache() {
+    // SAFETY: Never overwrite the cache with fewer than what we expect
+    // This prevents any code path from accidentally shrinking the index
+    if (quoteIndex.length < 2000 && quoteIndex.length > 0) {
+        console.warn('updateIndexCache: BLOCKED — only ' + quoteIndex.length + ' entries (expected 2000+). Not overwriting cache.');
+        return;
+    }
     try {
+        // Always write v2 format — old code writing bare arrays will be IGNORED by loadQuoteIndex
         var cacheData = { version: 2, quotes: quoteIndex };
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index.json:/content';
         var resp = await fetch(url, {
@@ -3001,7 +3008,7 @@ async function updateIndexCache() {
             body: JSON.stringify(cacheData)
         });
         if (resp.ok) {
-            console.log('Index cache updated: ' + quoteIndex.length + ' entries');
+            console.log('Index cache updated: ' + quoteIndex.length + ' entries (v2)');
         } else {
             console.warn('Index cache update failed (non-critical): ' + resp.status);
         }
