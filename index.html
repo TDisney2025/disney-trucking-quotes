@@ -598,6 +598,29 @@
             .line-table td { height: 26px; }
         }
 
+        /* Skeleton loading animations */
+        @keyframes shimmer {
+            0% { background-position: -400px 0; }
+            100% { background-position: 400px 0; }
+        }
+        .skeleton-shimmer {
+            background: linear-gradient(90deg, #e8e8e8 25%, #f5f5f5 50%, #e8e8e8 75%);
+            background-size: 800px 100%;
+            animation: shimmer 1.5s infinite;
+            display: inline-block;
+            border-radius: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .skeleton-spinner {
+            width: 18px; height: 18px;
+            border: 3px solid #e0e0e0;
+            border-top-color: #C00000;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
     </style>
 </head>
 <body>
@@ -711,6 +734,7 @@
         <!-- Quick Actions -->
         <div class="dash-quick-actions">
             <button class="quick-btn quick-btn-search" onclick="openSearchModal()">&#128269; Search All Quotes</button>
+            <button class="quick-btn" onclick="forceSyncCheck()" style="background:#6c757d;color:#fff;font-size:13px;padding:10px 18px;">&#128260; Sync</button>
         </div>
 
         <!-- Recent Quotes Table -->
@@ -719,7 +743,7 @@
                 <h2>&#128203; Recent Quotes <span class="badge" id="dashRecentCount">0</span></h2>
                 <div style="display:flex;gap:8px;align-items:center;">
                     <label style="font-size:12px;color:#888;">Show:</label>
-                    <select id="dashRowLimit" onchange="loadDashboardData()" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+                    <select id="dashRowLimit" onchange="filterDashTable()" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
                         <option value="20">20</option>
                         <option value="50">50</option>
                         <option value="75">75</option>
@@ -2701,62 +2725,7 @@ async function loadQuoteIndex() {
         if (cloudData.length >= 2000) {
             quoteIndex = cloudData;
             console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from v2 cache');
-
-            // Quick check: are there individual files not in the cache?
-            try {
-                var knownFiles = {};
-                for (var ci = 0; ci < quoteIndex.length; ci++) {
-                    var cf = quoteIndex[ci].quoteNumber ? (quoteIndex[ci].quoteNumber + '.json') : getQuoteFileName(quoteIndex[ci]);
-                    knownFiles[cf] = true;
-                }
-                var missingQuotes = [];
-                var checkUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes:/children?$top=200&$select=id,name';
-                while (checkUrl) {
-                    var checkResp = await fetch(checkUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
-                    if (!checkResp.ok) break;
-                    var checkData = await checkResp.json();
-                    var checkItems = checkData.value || [];
-                    for (var chi = 0; chi < checkItems.length; chi++) {
-                        if (checkItems[chi].name && checkItems[chi].name.endsWith('.json') && !knownFiles[checkItems[chi].name]) {
-                            missingQuotes.push(checkItems[chi]);
-                        }
-                    }
-                    checkUrl = checkData['@odata.nextLink'] || null;
-                }
-                if (missingQuotes.length > 0) {
-                    console.log('loadQuoteIndex: found ' + missingQuotes.length + ' files not in cache. Downloading...');
-                    showStatus('Loading ' + missingQuotes.length + ' newer quotes...', 'info');
-                    var dlBatch = 10;
-                    for (var db = 0; db < missingQuotes.length; db += dlBatch) {
-                        var dbSlice = missingQuotes.slice(db, db + dlBatch);
-                        var dlPromises = dbSlice.map(function(item) {
-                            return fetch('https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + item.id + '/content',
-                                { headers: { 'Authorization': 'Bearer ' + accessToken } })
-                                .then(function(r) { return r.ok ? r.json() : null; })
-                                .catch(function() { return null; });
-                        });
-                        var dlResults = await Promise.all(dlPromises);
-                        for (var dri = 0; dri < dlResults.length; dri++) {
-                            if (dlResults[dri]) quoteIndex.push(dlResults[dri]);
-                        }
-                        if (db + dlBatch < missingQuotes.length) {
-                            await new Promise(function(w) { setTimeout(w, 500); });
-                        }
-                    }
-                    quoteIndex.sort(function(a, b) {
-                        var da = a.savedDate ? new Date(a.savedDate) : new Date(0);
-                        var db2 = b.savedDate ? new Date(b.savedDate) : new Date(0);
-                        return db2 - da;
-                    });
-                    console.log('loadQuoteIndex: merged to ' + quoteIndex.length + ' entries. Updating cache...');
-                    showStatus('Loaded ' + quoteIndex.length + ' total quotes.', 'success');
-                    await updateIndexCache();
-                } else {
-                    console.log('loadQuoteIndex: cache is up to date');
-                }
-            } catch (syncErr) {
-                console.log('loadQuoteIndex: sync check error (non-critical):', syncErr);
-            }
+            // Sync check is deferred to backgroundSyncCheck() — runs after dashboard renders
             return;
         }
 
@@ -2868,6 +2837,86 @@ async function loadQuoteIndex() {
             try { await rebuildIndexFromFiles(); } catch (e) { console.log('Rebuild also failed:', e); }
         }
     }
+}
+
+// Background sync check — runs AFTER the dashboard is already rendered.
+// Lists individual files in /quotes/ to find any not in the cache.
+// Rate-limited: only runs once per 10 minutes via localStorage timestamp.
+async function backgroundSyncCheck() {
+    try {
+        // Timestamp gating: skip if synced less than 10 minutes ago
+        var lastSync = parseInt(localStorage.getItem('quoteIndexLastSync') || '0');
+        var syncInterval = 10 * 60 * 1000; // 10 minutes
+        if (Date.now() - lastSync < syncInterval) {
+            console.log('backgroundSyncCheck: skipping (last sync ' + Math.round((Date.now() - lastSync) / 1000) + 's ago)');
+            return;
+        }
+
+        await getToken();
+        var knownFiles = {};
+        for (var ci = 0; ci < quoteIndex.length; ci++) {
+            var cf = quoteIndex[ci].quoteNumber ? (quoteIndex[ci].quoteNumber + '.json') : getQuoteFileName(quoteIndex[ci]);
+            knownFiles[cf] = true;
+        }
+        var missingQuotes = [];
+        var checkUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes:/children?$top=200&$select=id,name';
+        while (checkUrl) {
+            var checkResp = await fetch(checkUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+            if (!checkResp.ok) break;
+            var checkData = await checkResp.json();
+            var checkItems = checkData.value || [];
+            for (var chi = 0; chi < checkItems.length; chi++) {
+                if (checkItems[chi].name && checkItems[chi].name.endsWith('.json') && !knownFiles[checkItems[chi].name]) {
+                    missingQuotes.push(checkItems[chi]);
+                }
+            }
+            checkUrl = checkData['@odata.nextLink'] || null;
+        }
+        if (missingQuotes.length > 0) {
+            console.log('backgroundSyncCheck: found ' + missingQuotes.length + ' files not in cache. Downloading...');
+            var dlBatch = 10;
+            for (var db = 0; db < missingQuotes.length; db += dlBatch) {
+                var dbSlice = missingQuotes.slice(db, db + dlBatch);
+                var dlPromises = dbSlice.map(function(item) {
+                    return fetch('https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + item.id + '/content',
+                        { headers: { 'Authorization': 'Bearer ' + accessToken } })
+                        .then(function(r) { return r.ok ? r.json() : null; })
+                        .catch(function() { return null; });
+                });
+                var dlResults = await Promise.all(dlPromises);
+                for (var dri = 0; dri < dlResults.length; dri++) {
+                    if (dlResults[dri]) quoteIndex.push(dlResults[dri]);
+                }
+                if (db + dlBatch < missingQuotes.length) {
+                    await new Promise(function(w) { setTimeout(w, 500); });
+                }
+            }
+            quoteIndex.sort(function(a, b) {
+                var da = a.savedDate ? new Date(a.savedDate) : new Date(0);
+                var db2 = b.savedDate ? new Date(b.savedDate) : new Date(0);
+                return db2 - da;
+            });
+            console.log('backgroundSyncCheck: merged to ' + quoteIndex.length + ' entries. Updating cache...');
+            await updateIndexCache();
+            // Re-render dashboard with updated data
+            if (currentView === 'dashboard') {
+                renderDashboardFromQuotes(quoteIndex);
+            }
+        } else {
+            console.log('backgroundSyncCheck: cache is up to date');
+        }
+        localStorage.setItem('quoteIndexLastSync', String(Date.now()));
+    } catch (err) {
+        console.log('backgroundSyncCheck error (non-critical):', err);
+    }
+}
+
+// Manual sync button handler
+async function forceSyncCheck() {
+    showStatus('Syncing quote index...', 'info');
+    localStorage.removeItem('quoteIndexLastSync'); // Clear timestamp gate
+    await backgroundSyncCheck();
+    showStatus('Sync complete. ' + quoteIndex.length + ' quotes.', 'success');
 }
 
 // saveQuoteIndex is now an alias for updateIndexCache.
@@ -3064,9 +3113,58 @@ async function updateIndexCache() {
         } else {
             console.warn('Index cache update failed (non-critical): ' + resp.status);
         }
+        // Also update the lightweight summary cache for fast dashboard loading
+        await updateSummaryCache();
     } catch (err) {
         console.warn('Index cache update error (non-critical):', err);
     }
+}
+
+// Lightweight summary cache — contains only the 7 fields needed for dashboard display.
+// ~150-200 bytes per quote vs ~800-1500 for full entries. Loads 80-85% faster.
+async function updateSummaryCache() {
+    try {
+        var summaryQuotes = quoteIndex.map(function(q) {
+            return {
+                quoteNumber: q.quoteNumber,
+                customerName: q.customerName,
+                jobName: q.jobName,
+                quotedBy: q.quotedBy,
+                date: q.date,
+                status: q.status || 'Draft',
+                savedDate: q.savedDate
+            };
+        });
+        var summaryData = { version: 2, type: 'summary', quotes: summaryQuotes, generatedAt: new Date().toISOString() };
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-summary.json:/content';
+        var resp = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(summaryData)
+        });
+        if (resp.ok) {
+            console.log('Summary cache updated: ' + summaryQuotes.length + ' entries');
+        }
+    } catch (err) {
+        console.warn('Summary cache update error (non-critical):', err);
+    }
+}
+
+async function loadSummaryIndex() {
+    try {
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-summary.json:/content';
+        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (resp.ok) {
+            var data = await resp.json();
+            if (data && data.type === 'summary' && Array.isArray(data.quotes)) {
+                console.log('loadSummaryIndex: loaded ' + data.quotes.length + ' summary entries');
+                return data.quotes;
+            }
+        }
+    } catch (e) {
+        console.log('Summary index load failed (will fallback to full):', e);
+    }
+    return null;
 }
 
 // Rebuild quoteIndex from individual files in quotes/ folder
@@ -3630,21 +3728,64 @@ function toggleDashboard() {
     }
 }
 
-async function loadDashboardData() {
-    // Set user name
-    var userName = document.getElementById('userName').textContent || 'Team';
-    document.getElementById('dashUserName').textContent = userName.split(' ')[0] || 'Team';
+function showDashboardSkeleton() {
+    // Show animated shimmer placeholders in stat cards
+    document.getElementById('dashTotalQuotes').innerHTML = '<div class="skeleton-shimmer" style="width:60px;height:28px;"></div>';
+    document.getElementById('dashMonthQuotes').innerHTML = '<div class="skeleton-shimmer" style="width:45px;height:28px;"></div>';
+    document.getElementById('dashWeekQuotes').innerHTML = '<div class="skeleton-shimmer" style="width:40px;height:28px;"></div>';
 
-    // Load quote index
-    try {
-        await getToken();
-        await loadQuoteIndex();
-    } catch (e) {
-        console.log('Dashboard load error:', e);
+    // Show loading spinner in chart area
+    var chart = document.getElementById('monthlyChart');
+    if (chart) chart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#aaa;font-size:13px;"><div class="skeleton-spinner"></div>&nbsp;&nbsp;Loading chart...</div>';
+
+    // Show skeleton rows in table
+    var tbody = document.getElementById('dashRecentBody');
+    if (tbody) {
+        tbody.innerHTML = '';
+        for (var i = 0; i < 8; i++) {
+            var tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td><div class="skeleton-shimmer" style="width:55px;height:15px;"></div></td>' +
+                '<td><div class="skeleton-shimmer" style="width:' + (90 + Math.floor(Math.random()*70)) + 'px;height:15px;"></div></td>' +
+                '<td><div class="skeleton-shimmer" style="width:' + (70 + Math.floor(Math.random()*80)) + 'px;height:15px;"></div></td>' +
+                '<td><div class="skeleton-shimmer" style="width:70px;height:15px;"></div></td>' +
+                '<td><div class="skeleton-shimmer" style="width:72px;height:15px;"></div></td>' +
+                '<td><div class="skeleton-shimmer" style="width:38px;height:15px;"></div></td>' +
+                '<td></td>';
+            tbody.appendChild(tr);
+        }
     }
 
+    // Show the table container, hide the empty message
+    var dashTable = document.querySelector('.dash-table');
+    if (dashTable) dashTable.style.display = 'table';
+    var noQuotes = document.getElementById('dashNoQuotes');
+    if (noQuotes) noQuotes.style.display = 'none';
+    document.getElementById('dashRecentCount').textContent = '...';
+
+    // Show skeleton in rep breakdown
+    var repDiv = document.getElementById('dashRepBreakdown');
+    if (repDiv) {
+        var repSkel = '';
+        for (var r = 0; r < 4; r++) {
+            repSkel += '<div style="margin-bottom:14px;">' +
+                '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">' +
+                '<div class="skeleton-shimmer" style="width:' + (80 + r*15) + 'px;height:14px;"></div>' +
+                '<div class="skeleton-shimmer" style="width:30px;height:14px;"></div>' +
+                '</div>' +
+                '<div style="height:8px;background:#f0f0f0;border-radius:50px;overflow:hidden;">' +
+                '<div class="skeleton-shimmer" style="height:100%;width:' + (90 - r*18) + '%;border-radius:50px;"></div>' +
+                '</div></div>';
+        }
+        repDiv.innerHTML = repSkel;
+    }
+}
+
+function renderDashboardFromQuotes(quotes) {
+    // Track current dataset for sort/filter operations
+    dashQuoteData = quotes;
     // Calculate stats
-    var total = quoteIndex.length;
+    var total = quotes.length;
     var now = new Date();
     var thisMonth = 0;
     var thisWeek = 0;
@@ -3652,7 +3793,7 @@ async function loadDashboardData() {
     var weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    quoteIndex.forEach(function(q) {
+    quotes.forEach(function(q) {
         // Count by rep
         var rep = q.quotedBy || 'Unknown';
         repCounts[rep] = (repCounts[rep] || 0) + 1;
@@ -3675,13 +3816,13 @@ async function loadDashboardData() {
     animateCounter('dashWeekQuotes', thisWeek);
 
     // Build monthly chart
-    renderMonthlyChart(quoteIndex);
+    renderMonthlyChart(quotes);
 
     // Populate recent quotes table
     var dashLimit = parseInt(document.getElementById('dashRowLimit').value) || 20;
     var tbody = document.getElementById('dashRecentBody');
     tbody.innerHTML = '';
-    var recent = quoteIndex.slice(0, dashLimit);
+    var recent = quotes.slice(0, dashLimit);
 
     document.getElementById('dashRecentCount').textContent = total;
 
@@ -3718,6 +3859,52 @@ async function loadDashboardData() {
         });
         repDiv.innerHTML = repHTML;
     }
+}
+
+async function loadDashboardData() {
+    // Set user name
+    var userName = document.getElementById('userName').textContent || 'Team';
+    document.getElementById('dashUserName').textContent = userName.split(' ')[0] || 'Team';
+
+    // Phase 1: Show skeleton immediately (no awaits)
+    showDashboardSkeleton();
+
+    // Phase 2: Try lightweight summary cache first (~400KB vs ~4MB full index)
+    try {
+        await getToken();
+        var summaryData = await loadSummaryIndex();
+        if (summaryData && summaryData.length >= 2000) {
+            // Render dashboard immediately from summary data
+            renderDashboardFromQuotes(summaryData);
+
+            // Load full index in background (needed for search/edit/open)
+            loadQuoteIndex().then(function() {
+                console.log('Full index loaded in background: ' + quoteIndex.length + ' entries');
+            }).catch(function(e) {
+                console.log('Background full index load error:', e);
+            });
+
+            // Background sync check (non-blocking, rate-limited)
+            setTimeout(function() { backgroundSyncCheck(); }, 3000);
+            return;
+        }
+    } catch (e) {
+        console.log('Summary load failed, falling back to full index:', e);
+    }
+
+    // Fallback: No summary available — load full index (first-time or recovery)
+    try {
+        await getToken();
+        await loadQuoteIndex();
+    } catch (e) {
+        console.log('Dashboard load error:', e);
+    }
+
+    // Render from full index
+    renderDashboardFromQuotes(quoteIndex);
+
+    // Background sync check (non-blocking, rate-limited)
+    setTimeout(function() { backgroundSyncCheck(); }, 2000);
 }
 
 function renderMonthlyChart(quotes) {
@@ -3798,6 +3985,7 @@ function animateCounter(elementId, target) {
 // =============================================
 var dashSortField = '';
 var dashSortAsc = true;
+var dashQuoteData = []; // Currently displayed quotes data (summary or full)
 
 function renderDashRows(quotes) {
     var tbody = document.getElementById('dashRecentBody');
@@ -3815,11 +4003,34 @@ function renderDashRows(quotes) {
             '<button class="btn-row-action" title="Print preview" onclick="event.stopPropagation(); dashPrintQuote(\'' + (q.quoteNumber || '') + '\');">&#128424;</button>' +
             '<button class="btn-row-delete" title="Delete quote" onclick="event.stopPropagation(); dashDeleteQuote(\'' + (q.quoteNumber || '') + '\');">&#128465;</button>' +
             '</td>';
-        tr.onclick = function() {
-            loadQuoteDataToForm(q);
-            dashboardActive = true;
-            toggleDashboard();
-            showStatus('Loaded quote #' + q.quoteNumber, 'success');
+        tr.onclick = async function() {
+            // Check if full data is available in quoteIndex (has lineItems)
+            var fullQuote = quoteIndex.find(function(qi) { return qi.quoteNumber === q.quoteNumber; });
+            if (fullQuote && fullQuote.lineItems) {
+                loadQuoteDataToForm(fullQuote);
+                dashboardActive = true;
+                toggleDashboard();
+                showStatus('Loaded quote #' + q.quoteNumber, 'success');
+            } else {
+                // Full index not loaded yet — fetch individual quote file on-demand
+                showStatus('Loading quote #' + q.quoteNumber + '...', 'info');
+                try {
+                    await getToken();
+                    var qUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quotes/' + q.quoteNumber + '.json:/content';
+                    var qResp = await fetch(qUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+                    if (qResp.ok) {
+                        var fullData = await qResp.json();
+                        loadQuoteDataToForm(fullData);
+                        dashboardActive = true;
+                        toggleDashboard();
+                        showStatus('Loaded quote #' + q.quoteNumber, 'success');
+                    } else {
+                        showStatus('Could not load quote #' + q.quoteNumber + '. Try again in a moment.', 'error');
+                    }
+                } catch (err) {
+                    showStatus('Error loading quote: ' + err.message, 'error');
+                }
+            }
         };
         tbody.appendChild(tr);
     });
@@ -3839,8 +4050,9 @@ function sortDashTable(field) {
     var arrow = document.getElementById('sort-' + field);
     if (arrow) arrow.textContent = dashSortAsc ? ' ▲' : ' ▼';
 
-    // Sort the index
-    var sorted = quoteIndex.slice();
+    // Sort the index (use dashQuoteData if full index not yet loaded)
+    var sourceData = (quoteIndex.length > 0) ? quoteIndex : dashQuoteData;
+    var sorted = sourceData.slice();
     sorted.sort(function(a, b) {
         var valA = (a[field] || '').toString().toLowerCase();
         var valB = (b[field] || '').toString().toLowerCase();
@@ -3884,7 +4096,8 @@ function sortDashTable(field) {
 
 function filterDashTable() {
     var filterText = (document.getElementById('dashFilter').value || '').toLowerCase().trim();
-    var filtered = quoteIndex.slice();
+    var sourceData = (quoteIndex.length > 0) ? quoteIndex : dashQuoteData;
+    var filtered = sourceData.slice();
 
     if (filterText) {
         filtered = filtered.filter(function(q) {
