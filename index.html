@@ -1446,14 +1446,39 @@ function initializeApp() {
                     loadQuoteNumber();
                 }).catch(function(err) {
                     console.log("Silent token failed on load:", err.message);
+                    // Try popup fallback (works better on Edge)
+                    msalInstance.acquireTokenPopup({
+                        scopes: graphScopes,
+                        account: accounts[0]
+                    }).then(function(popupResponse) {
+                        console.log("Popup token acquired on load");
+                        accessToken = popupResponse.accessToken;
+                        showApp(accounts[0]);
+                        loadQuoteNumber();
+                    }).catch(function(popupErr) {
+                        console.log("Popup token also failed:", popupErr.message);
+                        // Show login screen with error — let user click Sign In manually
+                        document.getElementById("loginSection").style.display = "";
+                        showLoginError("Session expired. Please sign in again.");
+                    });
                 });
             }
         }
     }).catch(function(error) {
         console.error("handleRedirectPromise error:", error);
-        console.error("Error code:", error.errorCode);
-        console.error("Error details:", JSON.stringify(error));
+        // Ensure login screen is visible so user can retry
+        document.getElementById("loginSection").style.display = "";
+        showLoginError("Authentication error. Please sign in again.");
     });
+
+    // Safety net: if nothing has happened after 15 seconds, show login screen
+    setTimeout(function() {
+        var appVisible = document.getElementById("appSection").style.display !== "none";
+        if (!appVisible) {
+            document.getElementById("loginSection").style.display = "";
+            console.log("Safety timeout: showing login screen");
+        }
+    }, 15000);
 }
 
 window.addEventListener('DOMContentLoaded', initializeApp);
