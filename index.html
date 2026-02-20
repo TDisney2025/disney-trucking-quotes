@@ -2627,7 +2627,7 @@ async function handleNewQuote(type) {
         });
 
         // Reset defaults
-        document.getElementById('quotedBy').value = 'Stephen Disney';
+        document.getElementById('quotedBy').value = getLoggedInRepName() || 'Stephen Disney';
         document.getElementById('terms').value = 'Net 30';
         updateFooterEmail();
 
@@ -3312,7 +3312,7 @@ function loadQuoteDataToForm(data) {
     document.getElementById('jobName').value = data.jobName || '';
     document.getElementById('jobAddr1').value = data.jobAddr1 || '';
     document.getElementById('jobAddr2').value = data.jobAddr2 || '';
-    document.getElementById('quotedBy').value = data.quotedBy || 'Stephen Disney';
+    document.getElementById('quotedBy').value = data.quotedBy || getLoggedInRepName() || 'Stephen Disney';
     document.getElementById('terms').value = data.terms || 'Net 30';
     document.getElementById('dateField').textContent = data.date || formatDate(new Date());
     document.getElementById('validThrough').textContent = data.validThrough || '';
@@ -4006,10 +4006,8 @@ function getRepBadge(name) {
 
 // Show dashboard by default when app loads (after auth)
 function showDashboardOnLoad() {
-    setTimeout(function() {
-        showView('dashboard');
-        loadToolsData();
-    }, 500);
+    showView('dashboard');
+    loadToolsData(); // Runs in parallel with loadDashboardData() called by showView
 }
 
 // =============================================
@@ -4018,39 +4016,28 @@ function showDashboardOnLoad() {
 async function loadToolsData() {
     try {
         await getToken();
-        // Load sales reps
-        var repUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/sales-reps.json:/content';
-        var repResp = await fetch(repUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        var headers = { 'Authorization': 'Bearer ' + accessToken };
+        var base = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/';
+
+        // Fetch all tools data in parallel for faster loading
+        var [repResp, custResp, vendResp, svcResp, descResp] = await Promise.all([
+            fetch(base + 'sales-reps.json:/content', { headers: headers }),
+            fetch(base + 'customer-list.json:/content', { headers: headers }),
+            fetch(base + 'vendor-list.json:/content', { headers: headers }),
+            fetch(base + 'service-list.json:/content', { headers: headers }),
+            fetch(base + 'description-list.json:/content', { headers: headers })
+        ]);
+
         if (repResp.ok) {
             salesReps = await repResp.json();
             rebuildSalesRepEmails();
             populateQuotedByDropdown();
             updateFooterEmail();
         }
-        // Load customer list
-        var custUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/customer-list.json:/content';
-        var custResp = await fetch(custUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
-        if (custResp.ok) {
-            customerList = await custResp.json();
-        }
-        // Load vendor list
-        var vendUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/vendor-list.json:/content';
-        var vendResp = await fetch(vendUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
-        if (vendResp.ok) {
-            vendorList = await vendResp.json();
-        }
-        // Load service/items list
-        var svcUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/service-list.json:/content';
-        var svcResp = await fetch(svcUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
-        if (svcResp.ok) {
-            serviceList = await svcResp.json();
-        }
-        // Load description list
-        var descUrl = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/description-list.json:/content';
-        var descResp = await fetch(descUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
-        if (descResp.ok) {
-            descriptionList = await descResp.json();
-        }
+        if (custResp.ok) { customerList = await custResp.json(); }
+        if (vendResp.ok) { vendorList = await vendResp.json(); }
+        if (svcResp.ok) { serviceList = await svcResp.json(); }
+        if (descResp.ok) { descriptionList = await descResp.json(); }
     } catch (e) {
         console.log('Tools data load (first time is normal):', e.message);
     }
@@ -4144,6 +4131,24 @@ async function saveToolsDescriptions() {
 // =============================================
 // QUOTED BY DROPDOWN (dynamic from salesReps)
 // =============================================
+function getLoggedInRepName() {
+    // Match the logged-in MSAL user to a salesRep by email
+    try {
+        var account = msalInstance.getActiveAccount();
+        if (account && account.username) {
+            var loginEmail = account.username.toLowerCase();
+            for (var i = 0; i < salesReps.length; i++) {
+                if (salesReps[i].email && salesReps[i].email.toLowerCase() === loginEmail) {
+                    return salesReps[i].name;
+                }
+            }
+        }
+        // Fallback: use the display name from the account
+        if (account && account.name) return account.name;
+    } catch (e) {}
+    return ''; // No match found
+}
+
 function populateQuotedByDropdown() {
     var sel = document.getElementById('quotedBy');
     var current = sel.value;
