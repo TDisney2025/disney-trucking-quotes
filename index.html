@@ -680,7 +680,7 @@
         <div class="mobile-menu-items">
             <button onclick="showView('dashboard');toggleMobileMenu();">&#128202; Dashboard</button>
             <button onclick="showView('tools');toggleMobileMenu();">&#9881; Tools</button>
-            <button onclick="handleNewQuote('detail');showView('quote');toggleMobileMenu();">&#10010; New Detail Quote</button>
+            <button onclick="handleNewQuote('detail');showView('quote');toggleMobileMenu();">&#10010; New Detailed Quote</button>
             <button onclick="handleNewQuote('simple');showView('quote');toggleMobileMenu();" style="color:#3b82f6;">&#10010; New Simple Quote</button>
             <button onclick="handleCopyQuote();toggleMobileMenu();">&#128203; Copy Quote</button>
             <button onclick="handleDeleteQuote();toggleMobileMenu();">&#128465; Delete Quote</button>
@@ -701,8 +701,8 @@
                 <div class="dash-welcome">Welcome back, <span id="dashUserName"></span>! Here's your overview.</div>
             </div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                <button class="quick-btn" style="background: linear-gradient(135deg, #C00000, #ff4444); color:#fff;" onclick="handleNewQuote('detail'); showView('quote');">&#10010; Detail Quote</button>
-                <button class="quick-btn" style="background: linear-gradient(135deg, #1e40af, #3b82f6); color:#fff;" onclick="handleNewQuote('simple'); showView('quote');">&#10010; Simple Quote</button>
+                <button class="quick-btn" style="background: linear-gradient(135deg, #C00000, #ff4444); color:#fff;" onclick="handleNewQuote('detail'); showView('quote');">&#10010; New Detailed Quote</button>
+                <button class="quick-btn" style="background: linear-gradient(135deg, #1e40af, #3b82f6); color:#fff;" onclick="handleNewQuote('simple'); showView('quote');">&#10010; New Simple Quote</button>
             </div>
         </div>
 
@@ -2738,7 +2738,7 @@ async function loadQuoteIndex() {
     try {
         // Load from quote-index-v2.json — a separate file that old code cannot overwrite
         var v2Url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-v2.json:/content';
-        var v2Resp = await fetch(v2Url, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        var v2Resp = await fetch(v2Url, { headers: { 'Authorization': 'Bearer ' + accessToken, 'Cache-Control': 'no-cache' } });
         var cloudData = [];
         if (v2Resp.ok) {
             var v2Data = await v2Resp.json();
@@ -3178,7 +3178,7 @@ async function updateSummaryCache() {
 async function loadSummaryIndex() {
     try {
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-summary.json:/content';
-        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + accessToken, 'Cache-Control': 'no-cache' } });
         if (resp.ok) {
             var data = await resp.json();
             if (data && data.type === 'summary' && Array.isArray(data.quotes)) {
@@ -3927,6 +3927,26 @@ async function loadDashboardData() {
 
     // Render from full index
     renderDashboardFromQuotes(quoteIndex);
+
+    // If still 0 quotes after loading, retry once with fresh token
+    if (quoteIndex.length === 0) {
+        console.log('Dashboard: 0 quotes loaded — retrying with fresh token...');
+        try {
+            await getToken();
+            await loadQuoteIndex();
+            if (quoteIndex.length > 0) {
+                renderDashboardFromQuotes(quoteIndex);
+            } else {
+                // Show error with retry button
+                document.getElementById('dashTotalQuotes').innerHTML = '<span style="color:#C00000;font-size:14px;">Load failed</span>';
+                showStatus('Could not load quotes. Click Sync to retry, or refresh the page.', 'error');
+            }
+        } catch (retryErr) {
+            console.log('Dashboard retry also failed:', retryErr);
+            document.getElementById('dashTotalQuotes').innerHTML = '<span style="color:#C00000;font-size:14px;">Load failed</span>';
+            showStatus('Could not load quotes. Click Sync to retry, or refresh the page.', 'error');
+        }
+    }
 
     // Background sync check (non-blocking, rate-limited)
     setTimeout(function() { backgroundSyncCheck(); }, 2000);
