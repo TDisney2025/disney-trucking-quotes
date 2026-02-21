@@ -210,7 +210,9 @@
         .tools-view.active { display: block; }
         .tools-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
         .tools-header h1 { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-        .tools-grid { display: grid; grid-template-columns: 1fr; gap: 20px; max-width: 800px; margin: 0 auto; }
+        .tools-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
+        .tools-card-wide { grid-column: 1 / -1; }
+        @media (max-width: 768px) { .tools-grid { grid-template-columns: 1fr; } }
         .tools-card { background: #fff; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); overflow: hidden; }
         .tools-card-header { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; justify-content: space-between; }
         .tools-card-header h2 { font-size: 17px; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; gap: 8px; }
@@ -992,7 +994,7 @@
         </div>
         <div class="tools-grid">
             <!-- Sales Reps Card -->
-            <div class="tools-card">
+            <div class="tools-card tools-card-wide">
                 <div class="tools-card-header">
                     <h2>&#128101; Sales Reps <span id="repCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
                     <button class="btn-add-item" onclick="openRepForm()">&#10010; Add Rep</button>
@@ -1000,7 +1002,7 @@
                 <div class="tools-card-body" id="repsList"></div>
             </div>
             <!-- Customers Card -->
-            <div class="tools-card">
+            <div class="tools-card tools-card-wide">
                 <div class="tools-card-header">
                     <h2>&#128188; Customer List <span id="customerCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
                     <button class="btn-add-item" onclick="openCustomerForm()">&#10010; Add Customer</button>
@@ -1046,8 +1048,18 @@
                     <div id="descriptionsList"></div>
                 </div>
             </div>
-            <!-- Utilities Card -->
+            <!-- Activity Log Card -->
             <div class="tools-card">
+                <div class="tools-card-header">
+                    <h2>&#128203; Activity Log <span id="activityCount" style="font-size:14px;font-weight:normal;color:#888;"></span></h2>
+                    <button class="btn-add-item" onclick="if(confirm('Clear the entire activity log?')) clearActivityLog()" style="background:linear-gradient(135deg,#757575,#616161);">&#128465; Clear</button>
+                </div>
+                <div class="tools-card-body">
+                    <div id="activityLogList" style="font-size:13px;color:#555;"><em>No activity recorded yet.</em></div>
+                </div>
+            </div>
+            <!-- Utilities Card -->
+            <div class="tools-card tools-card-wide">
                 <div class="tools-card-header">
                     <h2>&#128295; Utilities</h2>
                 </div>
@@ -1229,6 +1241,7 @@ var customerList = []; // Will be loaded from OneDrive
 var vendorList = [];   // Will be loaded from OneDrive
 var serviceList = [];  // Will be loaded from OneDrive
 var descriptionList = []; // Will be loaded from OneDrive
+var activityLog = []; // Will be loaded from OneDrive
 var currentQuoteStatus = 'Draft'; // Track status of currently loaded quote
 var currentQuoteType = 'detail'; // 'detail' or 'simple'
 
@@ -3739,6 +3752,7 @@ function showView(view) {
         renderVendorList();
         renderServiceList();
         renderDescriptionList();
+        renderActivityLog();
     } else {
         quoteView.style.display = 'flex';
     }
@@ -4278,12 +4292,13 @@ async function loadToolsData() {
         var base = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/';
 
         // Fetch all tools data in parallel for faster loading
-        var [repResp, custResp, vendResp, svcResp, descResp] = await Promise.all([
+        var [repResp, custResp, vendResp, svcResp, descResp, actResp] = await Promise.all([
             fetch(base + 'sales-reps.json:/content', { headers: headers }),
             fetch(base + 'customer-list.json:/content', { headers: headers }),
             fetch(base + 'vendor-list.json:/content', { headers: headers }),
             fetch(base + 'service-list.json:/content', { headers: headers }),
-            fetch(base + 'description-list.json:/content', { headers: headers })
+            fetch(base + 'description-list.json:/content', { headers: headers }),
+            fetch(base + 'activity-log.json:/content', { headers: headers })
         ]);
 
         if (repResp.ok) {
@@ -4296,6 +4311,10 @@ async function loadToolsData() {
         if (vendResp.ok) { vendorList = await vendResp.json(); }
         if (svcResp.ok) { serviceList = await svcResp.json(); }
         if (descResp.ok) { descriptionList = await descResp.json(); }
+        if (actResp.ok) {
+            try { var actData = await actResp.json(); if (Array.isArray(actData)) activityLog = actData; } catch(e) {}
+            renderActivityLog();
+        }
     } catch (e) {
         console.log('Tools data load (first time is normal):', e.message);
     }
@@ -4514,6 +4533,7 @@ async function saveRepForm() {
     renderRepsList();
     closeRepForm();
     await saveToolsReps();
+    logActivity(idx >= 0 ? 'edited' : 'added', 'Sales Reps', rep.name);
     showStatus('Sales rep saved!', 'success');
 }
 
@@ -4526,6 +4546,7 @@ async function toggleRepActive(idx) {
     updateFooterEmail();
     renderRepsList();
     await saveToolsReps();
+    logActivity(rep.active ? 'reactivated' : 'deactivated', 'Sales Reps', rep.name);
     showStatus(rep.name + ' set to ' + (rep.active ? 'active' : 'inactive') + '.', 'success');
 }
 
@@ -4617,14 +4638,17 @@ async function saveCustomerForm() {
     renderCustomerList();
     closeCustomerForm();
     await saveToolsCustomers();
+    logActivity(idx >= 0 ? 'edited' : 'added', 'Customers', cust.name);
     showStatus('Customer saved!', 'success');
 }
 
 async function deleteCustomer(idx) {
-    if (!confirm('Remove ' + customerList[idx].name + ' from customer list?')) return;
+    var custName = customerList[idx].name;
+    if (!confirm('Remove ' + custName + ' from customer list?')) return;
     customerList.splice(idx, 1);
     renderCustomerList();
     await saveToolsCustomers();
+    logActivity('deleted', 'Customers', custName);
     showStatus('Customer removed.', 'success');
 }
 
@@ -4836,14 +4860,17 @@ async function saveVendorForm() {
     renderVendorList();
     closeVendorForm();
     await saveToolsVendors();
+    logActivity(idx >= 0 ? 'edited' : 'added', 'Vendors', name);
     showStatus('Vendor saved!', 'success');
 }
 
 async function deleteVendor(idx) {
-    if (!confirm('Remove ' + vendorList[idx].name + ' from vendor list?')) return;
+    var vendorName = vendorList[idx].name;
+    if (!confirm('Remove ' + vendorName + ' from vendor list?')) return;
     vendorList.splice(idx, 1);
     renderVendorList();
     await saveToolsVendors();
+    logActivity('deleted', 'Vendors', vendorName);
     showStatus('Vendor removed.', 'success');
 }
 
@@ -4918,14 +4945,17 @@ async function saveServiceForm() {
     renderServiceList();
     closeServiceForm();
     await saveToolsServices();
+    logActivity(idx >= 0 ? 'edited' : 'added', 'Items/Services', name);
     showStatus('Item/service saved!', 'success');
 }
 
 async function deleteService(idx) {
-    if (!confirm('Remove ' + serviceList[idx].name + ' from items/services list?')) return;
+    var svcName = serviceList[idx].name;
+    if (!confirm('Remove ' + svcName + ' from items/services list?')) return;
     serviceList.splice(idx, 1);
     renderServiceList();
     await saveToolsServices();
+    logActivity('deleted', 'Items/Services', svcName);
     showStatus('Item/service removed.', 'success');
 }
 
@@ -5000,15 +5030,113 @@ async function saveDescriptionForm() {
     renderDescriptionList();
     closeDescriptionForm();
     await saveToolsDescriptions();
+    logActivity(idx >= 0 ? 'edited' : 'added', 'Descriptions', name);
     showStatus('Description saved!', 'success');
 }
 
 async function deleteDescription(idx) {
-    if (!confirm('Remove "' + descriptionList[idx].name + '" from descriptions list?')) return;
+    var descName = descriptionList[idx].name;
+    if (!confirm('Remove "' + descName + '" from descriptions list?')) return;
     descriptionList.splice(idx, 1);
     renderDescriptionList();
     await saveToolsDescriptions();
+    logActivity('deleted', 'Descriptions', descName);
     showStatus('Description removed.', 'success');
+}
+
+// =============================================
+// ACTIVITY LOG
+// =============================================
+async function logActivity(action, section, detail) {
+    try {
+        var userName = getLoggedInRepName() || (msalInstance.getActiveAccount() || {}).name || 'Unknown';
+        var entry = {
+            timestamp: new Date().toISOString(),
+            user: userName,
+            action: action,
+            section: section,
+            detail: detail
+        };
+        activityLog.unshift(entry);
+        // Keep only last 200 entries
+        if (activityLog.length > 200) activityLog = activityLog.slice(0, 200);
+        renderActivityLog();
+        // Save to OneDrive (non-blocking)
+        await getToken();
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/activity-log.json:/content';
+        await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify(activityLog)
+        });
+    } catch (e) {
+        console.log('Activity log save error (non-critical):', e);
+    }
+}
+
+async function loadActivityLog() {
+    try {
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/activity-log.json:/content';
+        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        if (resp.ok) {
+            var data = await resp.json();
+            if (Array.isArray(data)) {
+                activityLog = data;
+            }
+        }
+    } catch (e) {
+        console.log('Activity log load failed (first time is normal):', e);
+    }
+    renderActivityLog();
+}
+
+function renderActivityLog() {
+    var container = document.getElementById('activityLogList');
+    if (!container) return;
+    var countEl = document.getElementById('activityCount');
+    if (countEl) countEl.textContent = '(' + activityLog.length + ')';
+    if (activityLog.length === 0) {
+        container.innerHTML = '<em style="color:#aaa;">No activity recorded yet.</em>';
+        return;
+    }
+    var html = '';
+    var limit = Math.min(activityLog.length, 50);
+    for (var i = 0; i < limit; i++) {
+        var entry = activityLog[i];
+        var ts = new Date(entry.timestamp);
+        var timeStr = ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        var actionColor = entry.action === 'deleted' ? '#c62828' : entry.action === 'added' ? '#2e7d32' : '#1565c0';
+        html += '<div class="tools-list-item" style="padding:8px 12px;margin-bottom:4px;">';
+        html += '<div class="item-info">';
+        html += '<div class="item-name" style="font-size:13px;">';
+        html += '<strong>' + (entry.user || 'Unknown') + '</strong> ';
+        html += '<span style="color:' + actionColor + ';font-weight:600;">' + (entry.action || '') + '</span> ';
+        html += '"' + (entry.detail || '') + '" in <em>' + (entry.section || '') + '</em>';
+        html += '</div>';
+        html += '<div class="item-detail" style="font-size:11px;color:#aaa;">' + timeStr + '</div>';
+        html += '</div></div>';
+    }
+    if (activityLog.length > 50) {
+        html += '<div style="text-align:center;color:#aaa;font-size:12px;padding:8px;">... and ' + (activityLog.length - 50) + ' more entries</div>';
+    }
+    container.innerHTML = html;
+}
+
+async function clearActivityLog() {
+    activityLog = [];
+    renderActivityLog();
+    try {
+        await getToken();
+        var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/activity-log.json:/content';
+        await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify([])
+        });
+        showStatus('Activity log cleared.', 'success');
+    } catch (e) {
+        console.log('Activity log clear error:', e);
+    }
 }
 
 // =============================================
