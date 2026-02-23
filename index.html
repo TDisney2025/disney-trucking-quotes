@@ -1821,6 +1821,9 @@ async function saveQuote() {
             throw new Error('Upload failed (' + uploadResp.status + '): ' + errText);
         }
 
+        // Safety: save draft to localStorage BEFORE attempting OneDrive write
+        autoSaveDraft();
+
         // Save quote data — individual file FIRST (source of truth), then cache
         showStatus('Saving quote data...', 'info');
         var quoteData = getQuoteDataFromForm();
@@ -2593,10 +2596,19 @@ async function handleEmailQuote() {
         updateStatusBadge();
         try {
             var emailQuoteData = getQuoteDataFromForm();
+            // Safety: save draft to localStorage BEFORE attempting OneDrive write
+            autoSaveDraft();
             await saveIndividualQuote(emailQuoteData);
             addQuoteToIndex(emailQuoteData);
             await updateIndexCache();
-        } catch (e) { console.log('Status save after email:', e); }
+            // Clear draft only after successful save
+            clearDraft(emailQuoteData.quoteNumber);
+        } catch (e) {
+            console.error('CRITICAL: Save failed after email send:', e);
+            autoSaveDraft();
+            showStatus('WARNING: Email sent but quote data failed to save! Your draft is saved locally. Please click Save to retry.', 'error');
+            if (window.innerWidth <= 768) alert('Email sent but save failed! Please click Save to retry.');
+        }
 
     } catch (error) {
         console.error('Email send error:', error);
