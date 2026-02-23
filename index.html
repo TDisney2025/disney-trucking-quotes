@@ -2762,6 +2762,7 @@ async function loadQuoteIndex() {
 
         if (cloudData.length >= 2000) {
             quoteIndex = cloudData;
+            deduplicateIndex();
             console.log('loadQuoteIndex: loaded ' + quoteIndex.length + ' entries from v2 cache');
             // Sync check is deferred to backgroundSyncCheck() — runs after dashboard renders
             return;
@@ -2864,6 +2865,7 @@ async function loadQuoteIndex() {
         });
 
         quoteIndex = mergedArr;
+        deduplicateIndex();
         console.log('loadQuoteIndex: recovered ' + quoteIndex.length + ' entries (baseline + cache + files)');
         if (quoteIndex.length > 0) {
             showStatus('Recovered ' + quoteIndex.length + ' quotes. Updating cache...', 'success');
@@ -2929,6 +2931,7 @@ async function backgroundSyncCheck() {
                     await new Promise(function(w) { setTimeout(w, 500); });
                 }
             }
+            deduplicateIndex();
             quoteIndex.sort(function(a, b) {
                 var da = a.savedDate ? new Date(a.savedDate) : new Date(0);
                 var db2 = b.savedDate ? new Date(b.savedDate) : new Date(0);
@@ -2965,9 +2968,41 @@ async function saveQuoteIndex() {
 
 function addQuoteToIndex(quoteData) {
     // Remove existing entry with same quote number (update)
-    quoteIndex = quoteIndex.filter(q => q.quoteNumber !== quoteData.quoteNumber);
+    // IMPORTANT: Only deduplicate if quoteNumber is non-empty — empty string matches too many entries
+    if (quoteData.quoteNumber) {
+        quoteIndex = quoteIndex.filter(q => q.quoteNumber !== quoteData.quoteNumber);
+    }
     quoteIndex.unshift(quoteData); // add to front (most recent first)
     // No cap — keep all quotes in the index
+}
+
+// Remove duplicate entries from quoteIndex. For numbered quotes, keep the newest by savedDate.
+// For unnumbered quotes, deduplicate by customerName+jobName+savedDate.
+function deduplicateIndex() {
+    var seen = {};
+    var deduped = [];
+    var removed = 0;
+    for (var i = 0; i < quoteIndex.length; i++) {
+        var q = quoteIndex[i];
+        var key;
+        if (q.quoteNumber) {
+            key = 'num:' + q.quoteNumber;
+        } else {
+            // For unnumbered quotes, use customer+job+savedDate as unique key
+            key = 'nonum:' + (q.customerName || '') + '|' + (q.jobName || '') + '|' + (q.savedDate || '');
+        }
+        if (!seen[key]) {
+            seen[key] = true;
+            deduped.push(q);
+        } else {
+            removed++;
+        }
+    }
+    if (removed > 0) {
+        console.log('deduplicateIndex: removed ' + removed + ' duplicate entries (' + quoteIndex.length + ' → ' + deduped.length + ')');
+        quoteIndex = deduped;
+    }
+    return removed;
 }
 
 // Merge two quote index arrays, deduplicating by quoteNumber.
@@ -2977,13 +3012,13 @@ function mergeQuoteIndices(localIndex, cloudIndex) {
     // Add all cloud entries first
     for (var i = 0; i < cloudIndex.length; i++) {
         var q = cloudIndex[i];
-        var key = q.quoteNumber || ('no-num-' + i);
+        var key = q.quoteNumber ? ('num:' + q.quoteNumber) : ('nonum:' + (q.customerName || '') + '|' + (q.jobName || '') + '|' + (q.savedDate || ''));
         merged[key] = q;
     }
     // Then add/overwrite with local entries (keep newer version)
     for (var j = 0; j < localIndex.length; j++) {
         var lq = localIndex[j];
-        var lkey = lq.quoteNumber || ('no-num-local-' + j);
+        var lkey = lq.quoteNumber ? ('num:' + lq.quoteNumber) : ('nonum:' + (lq.customerName || '') + '|' + (lq.jobName || '') + '|' + (lq.savedDate || ''));
         var existing = merged[lkey];
         if (!existing) {
             merged[lkey] = lq;
@@ -3138,6 +3173,8 @@ async function updateIndexCache() {
         return;
     }
     try {
+        // Ensure no duplicates before writing
+        deduplicateIndex();
         // Write to quote-index-v2.json — separate file that old code cannot overwrite
         var cacheData = { version: 2, quotes: quoteIndex };
         var url = 'https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + folderId + ':/quote-index-v2.json:/content';
