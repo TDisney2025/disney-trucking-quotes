@@ -213,6 +213,27 @@
         .tools-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
         .tools-card-wide { grid-column: 1 / -1; }
         @media (max-width: 768px) { .tools-grid { grid-template-columns: 1fr; } }
+        /* Multi-email input rows in Tools customer form */
+        .email-list-row { display:flex; gap:6px; margin-bottom:6px; align-items:center; }
+        .email-list-row input { flex:1; }
+        .email-list-row .btn-remove-email { background:#e53935; color:#fff; border:none; border-radius:4px; width:28px; height:28px; cursor:pointer; font-size:16px; line-height:28px; text-align:center; flex-shrink:0; }
+        .email-list-row .btn-remove-email:hover { background:#c62828; }
+        .btn-add-email { background:none; border:1px dashed #1976D2; color:#1976D2; border-radius:4px; padding:4px 12px; cursor:pointer; font-size:13px; margin-top:2px; }
+        .btn-add-email:hover { background:#E3F2FD; }
+        /* Tag-based email selector on quote form */
+        .email-tags-wrapper { position:relative; }
+        .email-tags-container { display:flex; flex-wrap:wrap; gap:4px; padding:6px 10px; border:1px solid #e0e0e0; border-radius:8px; min-height:38px; cursor:pointer; background:#fff; align-items:center; }
+        .email-tags-container:hover { border-color:#1976D2; }
+        .email-tag { display:inline-flex; align-items:center; background:#E3F2FD; color:#1565C0; border-radius:12px; padding:2px 8px; font-size:13px; gap:4px; }
+        .email-tag .remove-tag { cursor:pointer; font-weight:bold; color:#1976D2; font-size:15px; line-height:1; }
+        .email-tag .remove-tag:hover { color:#c62828; }
+        .email-tags-placeholder { color:#999; font-size:13px; }
+        .email-dropdown { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #ddd; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:1000; max-height:200px; overflow-y:auto; display:none; margin-top:2px; }
+        .email-dropdown.open { display:block; }
+        .email-dropdown-item { padding:8px 12px; cursor:pointer; font-size:13px; display:flex; align-items:center; gap:8px; }
+        .email-dropdown-item:hover { background:#E3F2FD; }
+        .email-dropdown-item.selected { background:#BBDEFB; font-weight:600; }
+        .email-dropdown-item .check-mark { width:16px; color:#1976D2; }
         .tools-card { background: #fff; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); overflow: hidden; }
         .tools-card-header { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; justify-content: space-between; }
         .tools-card-header h2 { font-size: 17px; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; gap: 8px; }
@@ -842,7 +863,13 @@
                     </div>
                     <div class="info-field">
                         <label>Email</label>
-                        <input type="email" id="customerEmail" placeholder="customer@email.com" onblur="promptSaveCustomerEmail()">
+                        <input type="hidden" id="customerEmail">
+                        <div class="email-tags-wrapper">
+                            <div class="email-tags-container" id="emailTagsContainer" onclick="toggleEmailDropdown(event)">
+                                <span class="email-tags-placeholder" id="emailTagsPlaceholder">Select email(s)...</span>
+                            </div>
+                            <div class="email-dropdown" id="emailDropdown"></div>
+                        </div>
                     </div>
                 </div>
                 <!-- Job -->
@@ -1117,7 +1144,7 @@
                 <div class="form-group"><label>Customer Name</label><input type="text" id="customerFormName" placeholder="e.g., 4M Materials"></div>
                 <div class="form-group"><label>Address Line 1</label><input type="text" id="customerFormAddr1" placeholder="e.g., 3125 Dora St"></div>
                 <div class="form-group"><label>Address Line 2</label><input type="text" id="customerFormAddr2" placeholder="e.g., Fort Myers, FL 33916"></div>
-                <div class="form-group"><label>Email</label><input type="email" id="customerFormEmail" placeholder="e.g., contact@company.com"></div>
+                <div class="form-group"><label>Emails</label><div id="customerEmailList"></div><button type="button" class="btn-add-email" onclick="addCustomerEmailRow()">+ Add Email</button></div>
             </div>
             <div class="tools-form-actions">
                 <button class="btn-form-cancel" onclick="closeCustomerForm()">Cancel</button>
@@ -1244,6 +1271,25 @@ var descriptionList = []; // Will be loaded from OneDrive
 var activityLog = []; // Will be loaded from OneDrive
 var currentQuoteStatus = 'Draft'; // Track status of currently loaded quote
 var currentQuoteType = 'detail'; // 'detail' or 'simple'
+var selectedEmailTags = []; // Currently selected emails in quote form tag selector
+var availableCustomerEmails = []; // Emails available in dropdown for current customer
+
+// Helper: get all emails for a customer (handles both old string and new array format)
+function getCustomerEmails(customer) {
+    if (!customer) return [];
+    if (Array.isArray(customer.emails) && customer.emails.length > 0) {
+        return customer.emails.filter(function(e) { return e && e.trim(); });
+    }
+    if (customer.email && customer.email.trim()) return [customer.email.trim()];
+    return [];
+}
+
+// Helper: set emails on a customer object (maintains backward compat)
+function setCustomerEmails(customer, emailsArray) {
+    var clean = (emailsArray || []).filter(function(e) { return e && e.trim(); }).map(function(e) { return e.trim(); });
+    customer.emails = clean;
+    customer.email = clean.length > 0 ? clean[0] : '';
+}
 
 // Backward compatibility helper
 var salesRepEmails = {};
@@ -2488,16 +2534,16 @@ async function handleEmailQuote() {
     const quoteNumber = document.getElementById('quoteNumber').value;
     const jobName = document.getElementById('jobName').value || 'your project';
     const customerName = document.getElementById('customerName').value || 'Customer';
-    const customerEmail = document.getElementById('customerEmail').value.trim();
+    const customerEmailRaw = document.getElementById('customerEmail').value.trim();
+    const customerEmailList = customerEmailRaw ? customerEmailRaw.split(',').map(function(e) { return e.trim(); }).filter(Boolean) : [];
     const quotedBy = document.getElementById('quotedBy').value;
 
     // Validate form before emailing
     if (!validateQuoteForm()) return;
 
-    // Require customer email
-    if (!customerEmail) {
-        showStatus('Please enter a customer email address before sending.', 'error');
-        document.getElementById('customerEmail').focus();
+    // Require at least one customer email
+    if (customerEmailList.length === 0) {
+        showStatus('Please select at least one customer email address before sending.', 'error');
         return;
     }
 
@@ -2554,7 +2600,7 @@ async function handleEmailQuote() {
             message: {
                 subject: emailSubject,
                 body: { contentType: 'HTML', content: emailBody },
-                toRecipients: [{ emailAddress: { address: customerEmail, name: customerName } }],
+                toRecipients: customerEmailList.map(function(e) { return { emailAddress: { address: e, name: customerName } }; }),
                 attachments: [{
                     '@odata.type': '#microsoft.graph.fileAttachment',
                     name: baseName + '.pdf',
@@ -2589,7 +2635,7 @@ async function handleEmailQuote() {
             await uploadToOneDrive(baseName + '.pdf', pdfBlob, 'application/pdf');
         } catch (e) { console.log('OneDrive save during email:', e); }
 
-        showStatus('Quote emailed to ' + customerEmail + '!', 'success');
+        showStatus('Quote emailed to ' + customerEmailList.join(', ') + '!', 'success');
 
         // Mark quote as Sent and save to index
         currentQuoteStatus = 'Sent';
@@ -2627,7 +2673,7 @@ async function handleEmailQuote() {
 
         var subjectEnc = encodeURIComponent('Quote Number ' + quoteNumber + ' for ' + jobName + ' from T. Disney Trucking');
         var bodyEnc = encodeURIComponent(greeting + ',\r\n\r\nPlease find the attached quote for ' + jobName + '. Let me know if you have any questions or need to add any additional items. We look forward to working on this project together!\r\n\r\nThank you!\r\n\r\n' + sigName + '\r\n' + sigCompany + '\r\n' + sigAddress + '\r\nPhone: ' + sigPhone + '\r\n' + (sigEmail ? 'Email: ' + sigEmail : ''));
-        window.location.href = 'mailto:' + encodeURIComponent(customerEmail) + '?subject=' + subjectEnc + '&body=' + bodyEnc;
+        window.location.href = 'mailto:' + encodeURIComponent(customerEmailList.join(',')) + '?subject=' + subjectEnc + '&body=' + bodyEnc;
     } finally {
         btnEmail.disabled = false;
         btnEmail.innerHTML = '&#9993; Email';
@@ -2648,21 +2694,144 @@ function blobToBase64(blob) {
     });
 }
 
-// Prompt to save customer email if new
+// Prompt to save new customer emails
 function promptSaveCustomerEmail() {
     var name = document.getElementById('customerName').value.trim();
-    var email = document.getElementById('customerEmail').value.trim();
-    if (!name || !email) return;
+    var formEmails = selectedEmailTags.slice();
+    if (!name || formEmails.length === 0) return;
 
     var existing = customerList.find(function(c) { return c.name.toLowerCase() === name.toLowerCase(); });
-    if (existing && !existing.email && email) {
-        if (confirm('Save email "' + email + '" for ' + name + '?')) {
-            existing.email = email;
+    if (!existing) return;
+    var custEmails = getCustomerEmails(existing);
+    var newEmails = formEmails.filter(function(e) { return custEmails.indexOf(e) === -1; });
+    if (newEmails.length > 0) {
+        if (confirm('Save new email(s) "' + newEmails.join(', ') + '" for ' + name + '?')) {
+            setCustomerEmails(existing, custEmails.concat(newEmails));
             saveToolsCustomers();
-            showStatus('Email saved for ' + name, 'success');
+            showStatus('Email(s) saved for ' + name, 'success');
         }
     }
 }
+
+// =============================================
+// EMAIL TAG SELECTOR (Quote Form)
+// =============================================
+function populateEmailDropdown(emails) {
+    availableCustomerEmails = emails || [];
+    renderEmailDropdown();
+}
+
+function renderEmailDropdown() {
+    var dropdown = document.getElementById('emailDropdown');
+    dropdown.innerHTML = '';
+    availableCustomerEmails.forEach(function(email) {
+        var item = document.createElement('div');
+        item.className = 'email-dropdown-item' + (selectedEmailTags.indexOf(email) !== -1 ? ' selected' : '');
+        var check = selectedEmailTags.indexOf(email) !== -1 ? '\u2713' : '';
+        item.innerHTML = '<span class="check-mark">' + check + '</span>' + email;
+        item.onclick = function(e) {
+            e.stopPropagation();
+            toggleEmailTag(email);
+        };
+        dropdown.appendChild(item);
+    });
+    // Add manual entry option
+    var addItem = document.createElement('div');
+    addItem.className = 'email-dropdown-item';
+    addItem.style.color = '#1976D2';
+    addItem.style.fontStyle = 'italic';
+    addItem.innerHTML = '<span class="check-mark"></span>+ Enter new email...';
+    addItem.onclick = function(e) {
+        e.stopPropagation();
+        var newEmail = prompt('Enter email address:');
+        if (newEmail && newEmail.trim()) {
+            newEmail = newEmail.trim();
+            if (availableCustomerEmails.indexOf(newEmail) === -1) {
+                availableCustomerEmails.push(newEmail);
+            }
+            if (selectedEmailTags.indexOf(newEmail) === -1) {
+                selectedEmailTags.push(newEmail);
+            }
+            syncEmailTagsToHiddenInput();
+            renderEmailTags();
+            renderEmailDropdown();
+        }
+    };
+    dropdown.appendChild(addItem);
+}
+
+function toggleEmailTag(email) {
+    var idx = selectedEmailTags.indexOf(email);
+    if (idx !== -1) {
+        selectedEmailTags.splice(idx, 1);
+    } else {
+        selectedEmailTags.push(email);
+    }
+    syncEmailTagsToHiddenInput();
+    renderEmailTags();
+    renderEmailDropdown();
+}
+
+function renderEmailTags() {
+    var container = document.getElementById('emailTagsContainer');
+    // Remove existing tags but keep placeholder
+    var existingTags = container.querySelectorAll('.email-tag');
+    existingTags.forEach(function(t) { t.remove(); });
+    var placeholder = document.getElementById('emailTagsPlaceholder');
+
+    if (selectedEmailTags.length === 0) {
+        placeholder.style.display = '';
+    } else {
+        placeholder.style.display = 'none';
+        selectedEmailTags.forEach(function(email) {
+            var tag = document.createElement('span');
+            tag.className = 'email-tag';
+            tag.innerHTML = email + ' <span class="remove-tag" onclick="event.stopPropagation(); removeEmailTag(\'' + email.replace(/'/g, "\\'") + '\')">&times;</span>';
+            container.insertBefore(tag, placeholder);
+        });
+    }
+}
+
+function removeEmailTag(email) {
+    var idx = selectedEmailTags.indexOf(email);
+    if (idx !== -1) selectedEmailTags.splice(idx, 1);
+    syncEmailTagsToHiddenInput();
+    renderEmailTags();
+    renderEmailDropdown();
+}
+
+function clearEmailTags() {
+    selectedEmailTags = [];
+    availableCustomerEmails = [];
+    syncEmailTagsToHiddenInput();
+    renderEmailTags();
+    var dropdown = document.getElementById('emailDropdown');
+    if (dropdown) { dropdown.innerHTML = ''; dropdown.classList.remove('open'); }
+}
+
+function syncEmailTagsToHiddenInput() {
+    document.getElementById('customerEmail').value = selectedEmailTags.join(',');
+}
+
+function toggleEmailDropdown(e) {
+    e.stopPropagation();
+    var dropdown = document.getElementById('emailDropdown');
+    if (dropdown.classList.contains('open')) {
+        dropdown.classList.remove('open');
+    } else {
+        renderEmailDropdown();
+        dropdown.classList.add('open');
+    }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    var wrapper = document.querySelector('.email-tags-wrapper');
+    var dropdown = document.getElementById('emailDropdown');
+    if (wrapper && dropdown && !wrapper.contains(e.target)) {
+        dropdown.classList.remove('open');
+    }
+});
 
 // =============================================
 // NEW QUOTE
@@ -2699,6 +2868,7 @@ async function handleNewQuote(type) {
         ['customerName', 'customerAddr1', 'customerAddr2', 'customerEmail', 'jobName', 'jobAddr1', 'jobAddr2'].forEach(function(id) {
             document.getElementById(id).value = '';
         });
+        clearEmailTags();
 
         // Reset defaults
         document.getElementById('quotedBy').value = getLoggedInRepName() || 'Stephen Disney';
@@ -3470,6 +3640,7 @@ function getQuoteDataFromForm() {
         customerAddr1: document.getElementById('customerAddr1').value,
         customerAddr2: document.getElementById('customerAddr2').value,
         customerEmail: document.getElementById('customerEmail').value,
+        customerEmails: selectedEmailTags.slice(),
         jobName: document.getElementById('jobName').value,
         jobAddr1: document.getElementById('jobAddr1').value,
         jobAddr2: document.getElementById('jobAddr2').value,
@@ -3493,7 +3664,17 @@ function loadQuoteDataToForm(data) {
     document.getElementById('customerName').value = data.customerName || '';
     document.getElementById('customerAddr1').value = data.customerAddr1 || '';
     document.getElementById('customerAddr2').value = data.customerAddr2 || '';
-    document.getElementById('customerEmail').value = data.customerEmail || '';
+    // Restore email tags from saved data
+    var savedEmails = data.customerEmails || (data.customerEmail ? data.customerEmail.split(',').map(function(e) { return e.trim(); }).filter(Boolean) : []);
+    selectedEmailTags = savedEmails;
+    // Try to get full customer email list for dropdown
+    var custMatch = customerList.find(function(c) { return c.name && data.customerName && c.name.toLowerCase() === data.customerName.toLowerCase(); });
+    var dropdownEmails = custMatch ? getCustomerEmails(custMatch) : [];
+    // Merge: include saved emails that might not be in customer record
+    savedEmails.forEach(function(e) { if (dropdownEmails.indexOf(e) === -1) dropdownEmails.push(e); });
+    populateEmailDropdown(dropdownEmails);
+    syncEmailTagsToHiddenInput();
+    renderEmailTags();
     document.getElementById('jobName').value = data.jobName || '';
     document.getElementById('jobAddr1').value = data.jobAddr1 || '';
     document.getElementById('jobAddr2').value = data.jobAddr2 || '';
@@ -3753,6 +3934,7 @@ async function handleDeleteQuote() {
         ['customerName', 'customerAddr1', 'customerAddr2', 'customerEmail', 'jobName', 'jobAddr1', 'jobAddr2'].forEach(function(id) {
             document.getElementById(id).value = '';
         });
+        clearEmailTags();
         // Reset to detail type and rebuild line items (clears all fields)
         currentQuoteType = 'detail';
         updateLineItemsTable();
@@ -4356,7 +4538,18 @@ async function loadToolsData() {
             populateQuotedByDropdown();
             updateFooterEmail();
         }
-        if (custResp.ok) { customerList = await custResp.json(); }
+        if (custResp.ok) {
+            customerList = await custResp.json();
+            // Migrate: ensure every customer has an emails array
+            var migrated = false;
+            customerList.forEach(function(c) {
+                if (!Array.isArray(c.emails)) {
+                    c.emails = c.email ? [c.email] : [];
+                    migrated = true;
+                }
+            });
+            if (migrated) saveToolsCustomers(); // fire and forget
+        }
         if (vendResp.ok) { vendorList = await vendResp.json(); }
         if (svcResp.ok) { serviceList = await svcResp.json(); }
         if (descResp.ok) { descriptionList = await descResp.json(); }
@@ -4632,7 +4825,7 @@ function renderCustomerList() {
         div.innerHTML =
             '<div class="item-info">' +
             '<div class="item-name">' + cust.name + '</div>' +
-            '<div class="item-detail">' + (cust.addr1 || '') + (cust.addr2 ? ', ' + cust.addr2 : '') + (cust.email ? ' &bull; ' + cust.email : '') + '</div>' +
+            '<div class="item-detail">' + (cust.addr1 || '') + (cust.addr2 ? ', ' + cust.addr2 : '') + (getCustomerEmails(cust).length > 0 ? ' &bull; ' + getCustomerEmails(cust).join(', ') : '') + '</div>' +
             '</div>' +
             '<div class="item-actions">' +
             '<button class="btn-icon btn-icon-edit" onclick="openCustomerForm(' + realIdx + ')" title="Edit">&#9998;</button>' +
@@ -4651,16 +4844,75 @@ function openCustomerForm(idx) {
         document.getElementById('customerFormName').value = cust.name || '';
         document.getElementById('customerFormAddr1').value = cust.addr1 || '';
         document.getElementById('customerFormAddr2').value = cust.addr2 || '';
-        document.getElementById('customerFormEmail').value = cust.email || '';
+        renderCustomerEmailInputs(getCustomerEmails(cust));
     } else {
         document.getElementById('customerFormTitle').textContent = 'Add Customer';
         document.getElementById('customerFormIndex').value = -1;
         document.getElementById('customerFormName').value = '';
         document.getElementById('customerFormAddr1').value = '';
         document.getElementById('customerFormAddr2').value = '';
-        document.getElementById('customerFormEmail').value = '';
+        renderCustomerEmailInputs(['']);
     }
     document.getElementById('customerFormName').focus();
+}
+
+function renderCustomerEmailInputs(emails) {
+    var container = document.getElementById('customerEmailList');
+    container.innerHTML = '';
+    if (!emails || emails.length === 0) emails = [''];
+    emails.forEach(function(email, i) {
+        addCustomerEmailRowHTML(container, email, emails.length > 1);
+    });
+}
+
+function addCustomerEmailRowHTML(container, email, showRemove) {
+    var row = document.createElement('div');
+    row.className = 'email-list-row';
+    var input = document.createElement('input');
+    input.type = 'email';
+    input.placeholder = 'e.g., contact@company.com';
+    input.value = email || '';
+    row.appendChild(input);
+    if (showRemove) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-remove-email';
+        btn.textContent = '\u00D7';
+        btn.onclick = function() { removeCustomerEmailRow(btn); };
+        row.appendChild(btn);
+    }
+    container.appendChild(row);
+}
+
+function addCustomerEmailRow() {
+    var container = document.getElementById('customerEmailList');
+    var rows = container.querySelectorAll('.email-list-row');
+    // Add remove buttons to existing rows if they don't have one
+    rows.forEach(function(row) {
+        if (!row.querySelector('.btn-remove-email')) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn-remove-email';
+            btn.textContent = '\u00D7';
+            btn.onclick = function() { removeCustomerEmailRow(btn); };
+            row.appendChild(btn);
+        }
+    });
+    addCustomerEmailRowHTML(container, '', true);
+    // Focus the new input
+    var inputs = container.querySelectorAll('input[type="email"]');
+    if (inputs.length > 0) inputs[inputs.length - 1].focus();
+}
+
+function removeCustomerEmailRow(btn) {
+    var container = document.getElementById('customerEmailList');
+    btn.closest('.email-list-row').remove();
+    var rows = container.querySelectorAll('.email-list-row');
+    // If only one row left, remove its delete button
+    if (rows.length === 1) {
+        var removeBtn = rows[0].querySelector('.btn-remove-email');
+        if (removeBtn) removeBtn.remove();
+    }
 }
 
 function closeCustomerForm() {
@@ -4669,11 +4921,16 @@ function closeCustomerForm() {
 
 async function saveCustomerForm() {
     var idx = parseInt(document.getElementById('customerFormIndex').value);
+    // Collect all emails from dynamic rows
+    var emailInputs = document.getElementById('customerEmailList').querySelectorAll('input[type="email"]');
+    var emails = [];
+    emailInputs.forEach(function(inp) { var v = inp.value.trim(); if (v) emails.push(v); });
     var cust = {
         name: document.getElementById('customerFormName').value.trim(),
         addr1: document.getElementById('customerFormAddr1').value.trim(),
         addr2: document.getElementById('customerFormAddr2').value.trim(),
-        email: document.getElementById('customerFormEmail').value.trim()
+        email: emails.length > 0 ? emails[0] : '',
+        emails: emails
     };
     if (!cust.name) { alert('Please enter a customer name.'); return; }
 
@@ -5557,18 +5814,26 @@ function parseCSVLine(line) {
 // Auto-add customer to list when saving a quote (if not already there)
 function autoAddCustomer(name, addr1, addr2, email) {
     if (!name) return;
+    // email param may be comma-separated from the hidden input
+    var newEmails = email ? email.split(',').map(function(e) { return e.trim(); }).filter(Boolean) : [];
     var exists = customerList.some(function(c) { return c.name.toLowerCase() === name.toLowerCase(); });
     if (!exists) {
-        customerList.push({ name: name, addr1: addr1 || '', addr2: addr2 || '', email: email || '' });
+        customerList.push({ name: name, addr1: addr1 || '', addr2: addr2 || '', email: newEmails[0] || '', emails: newEmails });
         customerList.sort(function(a, b) { return a.name.localeCompare(b.name); });
         saveToolsCustomers(); // fire and forget
     } else {
-        // Update address/email if changed
+        // Update address and merge emails
         var existing = customerList.find(function(c) { return c.name.toLowerCase() === name.toLowerCase(); });
         if (existing) {
             if (addr1) existing.addr1 = addr1;
             if (addr2) existing.addr2 = addr2;
-            if (email) existing.email = email;
+            // Merge new emails into existing list
+            var custEmails = getCustomerEmails(existing);
+            var changed = false;
+            newEmails.forEach(function(e) {
+                if (e && custEmails.indexOf(e) === -1) { custEmails.push(e); changed = true; }
+            });
+            if (changed) setCustomerEmails(existing, custEmails);
             saveToolsCustomers();
         }
     }
@@ -5599,7 +5864,12 @@ function showCustomerSuggestions(query) {
             document.getElementById('customerName').value = c.name;
             document.getElementById('customerAddr1').value = c.addr1 || '';
             document.getElementById('customerAddr2').value = c.addr2 || '';
-            document.getElementById('customerEmail').value = c.email || '';
+            // Populate email tag selector with customer's emails
+            var emails = getCustomerEmails(c);
+            selectedEmailTags = emails.length > 0 ? [emails[0]] : [];
+            populateEmailDropdown(emails);
+            syncEmailTagsToHiddenInput();
+            renderEmailTags();
             list.classList.remove('active');
             updateCustomerHistoryLink(c.name);
         };
